@@ -28,7 +28,9 @@
       <div class="body">
         <p class="title">{{ entry.book.title }}</p>
         <p class="series-name">{{ entry.series.name }}</p>
-        <span class="badge badge-ongoing">{{ entry.relative }}</span>
+        <div class="badge-stack">
+          <span class="badge badge-ongoing">{{ entry.relative }}</span>
+        </div>
       </div>
     </div>
     {% endfor %}
@@ -65,7 +67,10 @@
       <div class="body">
         <p class="title">{{ entry.book.title }}</p>
         <p class="series-name">{{ entry.series.name }}</p>
-        <span class="badge badge-date">{{ entry.relative }} &middot; {{ entry.book.release_date }}</span>
+        <div class="badge-stack">
+          <span class="badge badge-date">{{ entry.relative }}</span>
+          <span class="date-sub">{{ entry.book.release_date }}</span>
+        </div>
       </div>
     </div>
     {% endfor %}
