@@ -5,7 +5,7 @@ from fastapi.templating import Jinja2Templates
 from app.db import get_session, init_db
 from app.models import Series
 from app.scheduler import refresh_series, start_scheduler
-from app.scraper import SeriesPageError, fetch_series
+from app.scraper import SeriesPageError, fetch_series, search_series
 
 app = FastAPI(title="Audiobook Series Tracker")
 templates = Jinja2Templates(directory="app/templates")
@@ -31,6 +31,36 @@ def dashboard(request: Request):
         )
     finally:
         session.close()
+
+
+@app.get("/search", response_class=HTMLResponse)
+def search_form(request: Request, q: str | None = None):
+    results = []
+    error = None
+    if q:
+        try:
+            results = search_series(q)
+        except Exception as exc:  # noqa: BLE001 - surface any lookup failure to the page
+            error = f"Search failed: {exc}"
+
+        session = get_session()
+        try:
+            subscribed_asins = {asin for (asin,) in session.query(Series.asin).all()}
+        finally:
+            session.close()
+    else:
+        subscribed_asins = set()
+
+    return templates.TemplateResponse(
+        "search.html",
+        {
+            "request": request,
+            "q": q or "",
+            "results": results,
+            "error": error,
+            "subscribed_asins": subscribed_asins,
+        },
+    )
 
 
 @app.get("/add", response_class=HTMLResponse)

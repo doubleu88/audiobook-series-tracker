@@ -34,6 +34,15 @@ class ScrapedSeries:
     books: list[ScrapedBook]
 
 
+@dataclass
+class SeriesSearchResult:
+    asin: str
+    name: str
+    url: str
+    author: str | None
+    sample_title: str
+
+
 def extract_series_asin(url_or_asin: str) -> str:
     candidate = url_or_asin.strip()
     if re.fullmatch(r"[A-Z0-9]{10}", candidate):
@@ -122,3 +131,46 @@ def fetch_series(url_or_asin: str) -> ScrapedSeries:
     response.raise_for_status()
 
     return parse_series_page(response.text, fallback_url=url)
+
+
+def _name_from_slug(slug: str) -> str:
+    words = slug.split("-")
+    if words and words[-1].lower() == "audiobooks":
+        words = words[:-1]
+    return " ".join(words)
+
+
+def search_series(query: str) -> list[SeriesSearchResult]:
+    response = httpx.get(
+        "https://www.audible.com/search",
+        params={"keywords": query},
+        headers={"User-Agent": USER_AGENT},
+        follow_redirects=True,
+        timeout=20.0,
+    )
+    response.raise_for_status()
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    results: dict[str, SeriesSearchResult] = {}
+    for item in soup.select("li.productListItem"):
+        series_link = item.select_one('a[href*="/series/"]')
+        if series_link is None:
+            continue
+        href = series_link["href"].split("?")[0]
+        match = re.search(r"/series/([^/]+)/([A-Z0-9]{10})", href)
+        if not match:
+            continue
+        slug, series_asin = match.groups()
+        if series_asin in results:
+            continue
+
+        author_link = item.select_one('a[href*="/author/"]')
+        results[series_asin] = SeriesSearchResult(
+            asin=series_asin,
+            name=_name_from_slug(slug),
+            url=f"https://www.audible.com{href}",
+            author=author_link.get_text(strip=True) if author_link else None,
+            sample_title=item.get("aria-label", "").strip(),
+        )
+
+    return list(results.values())
