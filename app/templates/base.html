@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Audiobook Series Tracker</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    a { color: #2563eb; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1.5rem; }
+    th, td { text-align: left; padding: 0.6rem 0.5rem; border-bottom: 1px solid #e5e7eb; }
+    th { color: #6b7280; font-size: 0.85rem; text-transform: uppercase; }
+    .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.8rem; }
+    .badge-ended { background: #f3f4f6; color: #374151; }
+    .badge-upcoming { background: #dbeafe; color: #1e40af; }
+    .badge-unknown { background: #fef3c7; color: #92400e; }
+    form.inline { display: inline; }
+    button.link { background: none; border: none; color: #2563eb; cursor: pointer; padding: 0; font: inherit; }
+    input[type=text] { width: 100%; padding: 0.5rem; font-size: 1rem; }
+    .top-row { display: flex; justify-content: space-between; align-items: center; }
+    .error { color: #b91c1c; margin: 1rem 0; }
+  </style>
+</head>
+<body>
+  <div class="top-row">
+    <h1>Audiobook Series Tracker</h1>
+    <a href="/add">+ Add series</a>
+  </div>
+  {% block content %}{% endblock %}
+</body>
+</html>

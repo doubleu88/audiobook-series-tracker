@@ -1,0 +1,9 @@
+services:
+  audiobook-tracker:
+    build: .
+    container_name: audiobook-tracker
+    ports:
+      - "8241:8000"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

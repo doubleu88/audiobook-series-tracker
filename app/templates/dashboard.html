@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block content %}
+{% if rows %}
+<table>
+  <thead>
+    <tr>
+      <th>Series</th>
+      <th>Status</th>
+      <th>Latest released</th>
+      <th>Next book</th>
+      <th>Last checked</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td><a href="{{ row.series.url }}" target="_blank" rel="noopener">{{ row.series.name }}</a></td>
+      <td>
+        {% if row.series.ended %}
+          <span class="badge badge-ended">Ended</span>
+        {% else %}
+          <span class="badge badge-upcoming">Ongoing</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if row.latest_released %}
+          {{ row.latest_released.title }}
+          {% if row.latest_released.release_date %}({{ row.latest_released.release_date }}){% endif %}
+        {% else %}
+          &mdash;
+        {% endif %}
+      </td>
+      <td>
+        {% if row.series.ended %}
+          &mdash;
+        {% elif row.upcoming %}
+          {{ row.upcoming.title }}
+          {% if row.upcoming.release_date %}
+            <br><span class="badge badge-upcoming">{{ row.upcoming.release_date }}</span>
+          {% else %}
+            <br><span class="badge badge-unknown">Date TBD</span>
+          {% endif %}
+        {% else %}
+          <span class="badge badge-unknown">No announced book</span>
+        {% endif %}
+      </td>
+      <td>{{ row.series.last_checked.strftime("%Y-%m-%d") if row.series.last_checked else "never" }}</td>
+      <td>
+        <form class="inline" method="post" action="/series/{{ row.series.id }}/refresh">
+          <button class="link" type="submit">Refresh</button>
+        </form>
+        &middot;
+        <form class="inline" method="post" action="/series/{{ row.series.id }}/toggle-ended">
+          <button class="link" type="submit">{{ "Mark ongoing" if row.series.ended else "Mark ended" }}</button>
+        </form>
+        &middot;
+        <form class="inline" method="post" action="/series/{{ row.series.id }}/delete"
+              onsubmit="return confirm('Unsubscribe from {{ row.series.name }}?');">
+          <button class="link" type="submit">Remove</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No series yet. <a href="/add">Add one</a> to get started.</p>
+{% endif %}
+{% endblock %}
