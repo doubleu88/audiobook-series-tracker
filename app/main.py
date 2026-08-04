@@ -1,3 +1,5 @@
+import datetime
+
 from fastapi import BackgroundTasks, FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -6,6 +8,7 @@ from app.db import get_session, init_db
 from app.models import Series
 from app.scheduler import refresh_series, start_scheduler
 from app.scraper import SeriesPageError, fetch_series, search_series
+from app.timeutil import humanize_relative, shift_months
 
 app = FastAPI(title="Audiobook Series Tracker")
 templates = Jinja2Templates(directory="app/templates")
@@ -15,11 +18,21 @@ scheduler = start_scheduler()
 
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request):
+def dashboard(request: Request, recent_months: int = 3, upcoming_months: int = 3):
+    recent_months = max(1, min(recent_months, 24))
+    upcoming_months = max(1, min(upcoming_months, 24))
+
     session = get_session()
     try:
         series_list = session.query(Series).order_by(Series.name).all()
         rows = []
+        today = datetime.date.today()
+        recent_cutoff = shift_months(today, -recent_months)
+        upcoming_cutoff = shift_months(today, upcoming_months)
+
+        recent_books = []
+        upcoming_books = []
+
         for series in series_list:
             upcoming = next((b for b in series.books if not b.released), None)
             latest_released = next(
@@ -34,8 +47,40 @@ def dashboard(request: Request):
                     "cover": cover,
                 }
             )
+
+            for book in series.books:
+                if book.release_date is None:
+                    continue
+                if recent_cutoff <= book.release_date <= today:
+                    recent_books.append(
+                        {
+                            "book": book,
+                            "series": series,
+                            "relative": humanize_relative((book.release_date - today).days),
+                        }
+                    )
+                elif today < book.release_date <= upcoming_cutoff:
+                    upcoming_books.append(
+                        {
+                            "book": book,
+                            "series": series,
+                            "relative": humanize_relative((book.release_date - today).days),
+                        }
+                    )
+
+        recent_books.sort(key=lambda r: r["book"].release_date, reverse=True)
+        upcoming_books.sort(key=lambda r: r["book"].release_date)
+
         return templates.TemplateResponse(
-            "dashboard.html", {"request": request, "rows": rows}
+            "dashboard.html",
+            {
+                "request": request,
+                "rows": rows,
+                "recent_books": recent_books,
+                "upcoming_books": upcoming_books,
+                "recent_months": recent_months,
+                "upcoming_months": upcoming_months,
+            },
         )
     finally:
         session.close()

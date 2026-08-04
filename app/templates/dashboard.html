@@ -1,76 +1,160 @@
 {% extends "base.html" %}
 {% block content %}
-{% if rows %}
-<table>
-  <thead>
-    <tr>
-      <th></th>
-      <th>Series</th>
-      <th>Status</th>
-      <th>Latest released</th>
-      <th>Next book</th>
-      <th>Last checked</th>
-      <th></th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for row in rows %}
-    <tr>
-      <td>
-        {% if row.cover %}
-          <img class="cover" src="{{ row.cover }}" alt="">
-        {% endif %}
-      </td>
-      <td><a href="{{ row.series.url }}" target="_blank" rel="noopener">{{ row.series.name }}</a></td>
-      <td>
-        {% if row.series.ended %}
-          <span class="badge badge-ended">Ended</span>
-        {% else %}
-          <span class="badge badge-upcoming">Ongoing</span>
-        {% endif %}
-      </td>
-      <td>
-        {% if row.latest_released %}
-          {{ row.latest_released.title }}
-          {% if row.latest_released.release_date %}({{ row.latest_released.release_date }}){% endif %}
-        {% else %}
-          &mdash;
-        {% endif %}
-      </td>
-      <td>
-        {% if row.series.ended %}
-          &mdash;
-        {% elif row.upcoming %}
-          {{ row.upcoming.title }}
-          {% if row.upcoming.release_date %}
-            <br><span class="badge badge-upcoming">{{ row.upcoming.release_date }}</span>
+
+<section class="block">
+  <div class="section-head">
+    <h2>🆕 Recently released</h2>
+    <form class="threshold-form" method="get" action="/">
+      <input type="hidden" name="upcoming_months" value="{{ upcoming_months }}">
+      last
+      <input type="number" name="recent_months" min="1" max="24" value="{{ recent_months }}">
+      months
+      <button type="submit">Apply</button>
+    </form>
+  </div>
+  {% if recent_books %}
+  <div class="card-grid">
+    {% for entry in recent_books %}
+    <div class="card">
+      <a href="{{ entry.book.url }}" target="_blank" rel="noopener">
+        <div class="cover-wrap">
+          {% if entry.book.cover_image %}
+            <img class="cover-lg" src="{{ entry.book.cover_image }}" alt="">
           {% else %}
-            <br><span class="badge badge-unknown">Date TBD</span>
+            📖
           {% endif %}
-        {% else %}
-          <span class="badge badge-unknown">No announced book</span>
-        {% endif %}
-      </td>
-      <td>{{ row.series.last_checked.strftime("%Y-%m-%d") if row.series.last_checked else "never" }}</td>
-      <td>
-        <form class="inline" method="post" action="/series/{{ row.series.id }}/refresh">
-          <button class="link" type="submit">Refresh</button>
-        </form>
-        &middot;
-        <form class="inline" method="post" action="/series/{{ row.series.id }}/toggle-ended">
-          <button class="link" type="submit">{{ "Mark ongoing" if row.series.ended else "Mark ended" }}</button>
-        </form>
-        &middot;
-        <form class="inline" method="post" action="/series/{{ row.series.id }}/delete"
-              onsubmit="return confirm('Unsubscribe from {{ row.series.name }}?');">
-          <button class="link" type="submit">Remove</button>
-        </form>
-      </td>
-    </tr>
+        </div>
+      </a>
+      <div class="body">
+        <p class="title">{{ entry.book.title }}</p>
+        <p class="series-name">{{ entry.series.name }}</p>
+        <span class="badge badge-ongoing">{{ entry.relative }}</span>
+      </div>
+    </div>
     {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<p>No series yet. <a href="/add">Add one</a> to get started.</p>
-{% endif %}
+  </div>
+  {% else %}
+  <p class="empty-hint">No books released in the last {{ recent_months }} months across your subscribed series.</p>
+  {% endif %}
+</section>
+
+<section class="block">
+  <div class="section-head">
+    <h2>📅 Releasing soon</h2>
+    <form class="threshold-form" method="get" action="/">
+      <input type="hidden" name="recent_months" value="{{ recent_months }}">
+      next
+      <input type="number" name="upcoming_months" min="1" max="24" value="{{ upcoming_months }}">
+      months
+      <button type="submit">Apply</button>
+    </form>
+  </div>
+  {% if upcoming_books %}
+  <div class="card-grid">
+    {% for entry in upcoming_books %}
+    <div class="card">
+      <a href="{{ entry.book.url }}" target="_blank" rel="noopener">
+        <div class="cover-wrap">
+          {% if entry.book.cover_image %}
+            <img class="cover-lg" src="{{ entry.book.cover_image }}" alt="">
+          {% else %}
+            📖
+          {% endif %}
+        </div>
+      </a>
+      <div class="body">
+        <p class="title">{{ entry.book.title }}</p>
+        <p class="series-name">{{ entry.series.name }}</p>
+        <span class="badge badge-date">{{ entry.relative }} &middot; {{ entry.book.release_date }}</span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty-hint">Nothing announced in the next {{ upcoming_months }} months across your subscribed series.</p>
+  {% endif %}
+</section>
+
+<section class="block">
+  <div class="section-head">
+    <h2>📚 All series <span class="meta-muted">({{ rows|length }})</span></h2>
+  </div>
+  {% if rows %}
+  <div class="series-table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th></th>
+        <th>Series</th>
+        <th>Status</th>
+        <th>Latest released</th>
+        <th>Next book</th>
+        <th>Last checked</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>
+          {% if row.cover %}
+            <img class="cover-sm" src="{{ row.cover }}" alt="">
+          {% else %}
+            <div class="cover-sm-placeholder">📖</div>
+          {% endif %}
+        </td>
+        <td class="series-name-cell"><a href="{{ row.series.url }}" target="_blank" rel="noopener">{{ row.series.name }}</a></td>
+        <td>
+          {% if row.series.ended %}
+            <span class="badge badge-ended">Ended</span>
+          {% else %}
+            <span class="badge badge-ongoing">Ongoing</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if row.latest_released %}
+            {{ row.latest_released.title }}
+            {% if row.latest_released.release_date %}<br><span class="meta-muted">{{ row.latest_released.release_date }}</span>{% endif %}
+          {% else %}
+            <span class="meta-muted">&mdash;</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if row.series.ended %}
+            <span class="meta-muted">&mdash;</span>
+          {% elif row.upcoming %}
+            {{ row.upcoming.title }}
+            {% if row.upcoming.release_date %}
+              <br><span class="badge badge-date">{{ row.upcoming.release_date }}</span>
+            {% else %}
+              <br><span class="badge badge-unknown">Date TBD</span>
+            {% endif %}
+          {% else %}
+            <span class="badge badge-unknown">No announced book</span>
+          {% endif %}
+        </td>
+        <td class="meta-muted">{{ row.series.last_checked.strftime("%Y-%m-%d") if row.series.last_checked else "never" }}</td>
+        <td>
+          <div class="row-actions">
+            <form class="inline" method="post" action="/series/{{ row.series.id }}/refresh">
+              <button class="link" type="submit">Refresh</button>
+            </form>
+            <form class="inline" method="post" action="/series/{{ row.series.id }}/toggle-ended">
+              <button class="link" type="submit">{{ "Mark ongoing" if row.series.ended else "Mark ended" }}</button>
+            </form>
+            <form class="inline" method="post" action="/series/{{ row.series.id }}/delete"
+                  onsubmit="return confirm('Unsubscribe from {{ row.series.name }}?');">
+              <button class="link" type="submit">Remove</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="empty-hint">No series yet. <a href="/search">Add one</a> to get started.</p>
+  {% endif %}
+</section>
 {% endblock %}
