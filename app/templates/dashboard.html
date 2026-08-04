@@ -4,6 +4,7 @@
 <table>
   <thead>
     <tr>
+      <th></th>
       <th>Series</th>
       <th>Status</th>
       <th>Latest released</th>
@@ -15,6 +16,11 @@
   <tbody>
     {% for row in rows %}
     <tr>
+      <td>
+        {% if row.cover %}
+          <img class="cover" src="{{ row.cover }}" alt="">
+        {% endif %}
+      </td>
       <td><a href="{{ row.series.url }}" target="_blank" rel="noopener">{{ row.series.name }}</a></td>
       <td>
         {% if row.series.ended %}

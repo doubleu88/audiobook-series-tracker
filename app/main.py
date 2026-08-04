@@ -25,7 +25,15 @@ def dashboard(request: Request):
             latest_released = next(
                 (b for b in reversed(series.books) if b.released), None
             )
-            rows.append({"series": series, "upcoming": upcoming, "latest_released": latest_released})
+            cover = next((b.cover_image for b in series.books if b.cover_image), None)
+            rows.append(
+                {
+                    "series": series,
+                    "upcoming": upcoming,
+                    "latest_released": latest_released,
+                    "cover": cover,
+                }
+            )
         return templates.TemplateResponse(
             "dashboard.html", {"request": request, "rows": rows}
         )

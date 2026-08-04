@@ -33,6 +33,7 @@ class Book(Base):
     position: Mapped[float | None] = mapped_column(nullable=True)
     release_date: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
     url: Mapped[str] = mapped_column(String)
+    cover_image: Mapped[str | None] = mapped_column(String, nullable=True)
 
     series: Mapped["Series"] = relationship(back_populates="books")
 

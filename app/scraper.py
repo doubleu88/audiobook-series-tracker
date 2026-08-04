@@ -24,6 +24,7 @@ class ScrapedBook:
     position: float | None
     release_date: datetime.date | None
     url: str
+    image_url: str | None
 
 
 @dataclass
@@ -104,6 +105,11 @@ def parse_series_page(html: str, fallback_url: str) -> ScrapedSeries:
 
         position = _parse_position(item)
 
+        image_url = None
+        img = item.select_one("div.adbl-asin-impression img")
+        if img and img.get("src"):
+            image_url = re.sub(r"_SL\d+_", "_SL120_", img["src"])
+
         books.append(
             ScrapedBook(
                 asin=asin,
@@ -111,6 +117,7 @@ def parse_series_page(html: str, fallback_url: str) -> ScrapedSeries:
                 position=position,
                 release_date=release_date,
                 url=url,
+                image_url=image_url,
             )
         )
 

@@ -34,6 +34,7 @@ def refresh_series(series_id: int) -> None:
             book.position = scraped_book.position
             book.release_date = scraped_book.release_date
             book.url = scraped_book.url
+            book.cover_image = scraped_book.image_url
 
         series.name = scraped.name
         series.last_checked = datetime.datetime.utcnow()
