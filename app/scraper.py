@@ -1,3 +1,8 @@
+# Audible has no public API for series/release data. Audnexus (api.audnex.us)
+# was evaluated first but only supports lookup-by-known-ASIN, not series
+# listing or search. So this scrapes Audible's own public series and search
+# pages instead, which robots.txt explicitly permits crawling.
+
 import datetime
 import re
 from dataclasses import dataclass
