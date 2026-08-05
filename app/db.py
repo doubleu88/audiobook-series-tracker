@@ -17,6 +17,8 @@ def _migrate(conn) -> None:
     book_columns = {col["name"] for col in inspect(conn).get_columns("books")}
     if "cover_image" not in book_columns:
         conn.execute(text("ALTER TABLE books ADD COLUMN cover_image VARCHAR"))
+    if "release_day_notified" not in book_columns:
+        conn.execute(text("ALTER TABLE books ADD COLUMN release_day_notified BOOLEAN DEFAULT 0"))
 
     if "users" in inspect(conn).get_table_names():
         user_columns = {col["name"] for col in inspect(conn).get_columns("users")}

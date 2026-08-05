@@ -111,6 +111,12 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
   account if someone forgets their password.
 - Push notifications use the standard Web Push API (VAPID), the same
   mechanism as any other PWA — no third-party push service or account is
-  involved. Notifications fire once a series has been scraped at least once
-  and a *later* refresh finds a new book or a newly-confirmed release date;
-  the initial scrape when you first subscribe never fires one.
+  involved. Each includes the relevant book's cover art as the notification
+  icon where one is available. There are three triggers, and all of them
+  require a series to have been scraped at least once already — the initial
+  scrape when you first subscribe never fires one, so subscribing to a
+  50-book backlog series doesn't flood you with notifications:
+  - a new book (or preorder) shows up that wasn't there before
+  - a book that had no release date gets one
+  - a book's release date arrives (fires once, on the day, even if the date
+    was announced long before)

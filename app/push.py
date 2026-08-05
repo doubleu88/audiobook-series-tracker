@@ -41,15 +41,24 @@ def get_vapid_public_key_b64() -> str:
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
-def send_push(subscription: PushSubscription, title: str, body: str, url: str = "/") -> bool:
+def send_push(
+    subscription: PushSubscription,
+    title: str,
+    body: str,
+    url: str = "/",
+    icon: str | None = None,
+) -> bool:
     """Sends a push notification. Returns False if the subscription is dead and should be removed."""
+    payload = {"title": title, "body": body, "url": url}
+    if icon:
+        payload["icon"] = icon
     try:
         webpush(
             subscription_info={
                 "endpoint": subscription.endpoint,
                 "keys": {"p256dh": subscription.p256dh, "auth": subscription.auth},
             },
-            data=json.dumps({"title": title, "body": body, "url": url}),
+            data=json.dumps(payload),
             vapid_private_key=str(_ensure_vapid_key()),
             vapid_claims={"sub": VAPID_CLAIMS_SUB},
         )
