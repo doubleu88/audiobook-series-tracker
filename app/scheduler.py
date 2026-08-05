@@ -198,6 +198,8 @@ def send_weekly_digests() -> None:
 def start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="UTC")
     scheduler.add_job(refresh_all_series, "interval", hours=24, id="refresh_all_series")
-    scheduler.add_job(send_weekly_digests, CronTrigger(day_of_week="mon", hour=13), id="weekly_digest")
+    scheduler.add_job(
+        send_weekly_digests, CronTrigger(day_of_week="mon", hour=13, timezone="UTC"), id="weekly_digest"
+    )
     scheduler.start()
     return scheduler
