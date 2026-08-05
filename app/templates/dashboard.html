@@ -147,9 +147,9 @@
             <form class="inline" method="post" action="/series/{{ row.series.id }}/toggle-ended">
               <button class="link" type="submit">{{ "Mark ongoing" if row.series.ended else "Mark ended" }}</button>
             </form>
-            <form class="inline" method="post" action="/series/{{ row.series.id }}/delete"
+            <form class="inline" method="post" action="/series/{{ row.series.id }}/unsubscribe"
                   onsubmit="return confirm('Unsubscribe from {{ row.series.name }}?');">
-              <button class="link" type="submit">Remove</button>
+              <button class="link" type="submit">Unsubscribe</button>
             </form>
           </div>
         </td>

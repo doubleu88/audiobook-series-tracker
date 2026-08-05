@@ -11,6 +11,11 @@ dates, and cover art.
 
 ## Features
 
+- **Multi-user accounts** — each person signs up and subscribes to their own
+  set of series. If two users subscribe to the same series, it's only
+  scraped and stored once and shared between them; unsubscribing just removes
+  your own subscription (the series sticks around until its last subscriber
+  drops it).
 - **Search Audible directly** to subscribe — no need to hunt down a series URL
   yourself (pasting a URL/ASIN is also supported as a fallback).
 - **Recently released** and **releasing soon** sections on the dashboard,
@@ -60,10 +65,16 @@ cd audiobook-series-tracker
 docker compose up -d --build
 ```
 
-The app will be available at **http://localhost:8241**.
+The app will be available at **http://localhost:8241**. Visit it and sign up
+for an account — the first account created automatically takes ownership of
+any series already in the database (relevant if you're migrating from an
+older single-user version of this app).
 
 Subscribed series and release data live in `./data/audiobooks.db` (SQLite),
-which is mounted as a volume so it persists across container rebuilds.
+which is mounted as a volume so it persists across container rebuilds. A
+session-signing secret is generated on first run and stored alongside it at
+`./data/.session_secret` — back both up together if you care about staying
+logged in across reinstalls.
 
 ### Running without Docker
 
@@ -81,6 +92,6 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
   Audible changes their page layout, scraping may break until it's updated.
 - "Series ended" is a manual flag you set yourself; there's no reliable public
   signal for this on Audible.
-- This is a single-user app with no authentication built in. It's intended
-  for personal use on a home network — put it behind your own reverse proxy
-  or VPN if you want to expose it beyond your LAN.
+- Signup is open to anyone who can reach the app (no invite codes or admin
+  approval). That's fine on a home LAN; put it behind your own reverse proxy
+  or VPN if you expose it more broadly.

@@ -1,11 +1,20 @@
 import datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
     pass
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String, unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=datetime.datetime.utcnow)
 
 
 class Series(Base):
@@ -21,6 +30,21 @@ class Series(Base):
     books: Mapped[list["Book"]] = relationship(
         back_populates="series", cascade="all, delete-orphan", order_by="Book.position"
     )
+    subscriptions: Mapped[list["Subscription"]] = relationship(
+        back_populates="series", cascade="all, delete-orphan"
+    )
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+    __table_args__ = (UniqueConstraint("user_id", "series_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    series_id: Mapped[int] = mapped_column(ForeignKey("series.id"), index=True)
+
+    user: Mapped["User"] = relationship()
+    series: Mapped["Series"] = relationship(back_populates="subscriptions")
 
 
 class Book(Base):
