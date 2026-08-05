@@ -77,6 +77,13 @@
       margin: 0;
       letter-spacing: -0.02em;
     }
+    .top-row h1 .brand {
+      color: var(--text);
+      text-decoration: none;
+    }
+    .top-row h1 .brand:hover {
+      color: var(--accent);
+    }
 
     .btn {
       display: inline-flex;
@@ -335,7 +342,7 @@
 <body>
   {% block header %}
   <div class="top-row">
-    <h1>🎧 Audiobook Series Tracker</h1>
+    <h1><a href="/" class="brand">🎧 Audiobook Series Tracker</a></h1>
     <div class="user-bar">
       {% if user %}
         <span>Signed in as <strong>{{ user.username }}</strong></span>
