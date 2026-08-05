@@ -1,4 +1,5 @@
 import datetime
+import secrets
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -17,6 +18,10 @@ class User(Base):
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=datetime.datetime.utcnow)
     last_login: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    digest_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    calendar_token: Mapped[str] = mapped_column(
+        String, unique=True, default=lambda: secrets.token_urlsafe(24)
+    )
 
 
 class Series(Base):
@@ -28,6 +33,9 @@ class Series(Base):
     url: Mapped[str] = mapped_column(String)
     ended: Mapped[bool] = mapped_column(Boolean, default=False)
     last_checked: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
+    last_failure_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    last_failure_reason: Mapped[str | None] = mapped_column(String, nullable=True)
 
     books: Mapped[list["Book"]] = relationship(
         back_populates="series", cascade="all, delete-orphan", order_by="Book.position"
@@ -44,6 +52,7 @@ class Subscription(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     series_id: Mapped[int] = mapped_column(ForeignKey("series.id"), index=True)
+    muted: Mapped[bool] = mapped_column(Boolean, default=False)
 
     user: Mapped["User"] = relationship()
     series: Mapped["Series"] = relationship(back_populates="subscriptions")
@@ -74,6 +83,7 @@ class Book(Base):
     url: Mapped[str] = mapped_column(String)
     cover_image: Mapped[str | None] = mapped_column(String, nullable=True)
     release_day_notified: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=datetime.datetime.utcnow)
 
     series: Mapped["Series"] = relationship(back_populates="books")
 

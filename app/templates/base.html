@@ -512,6 +512,17 @@
           <div class="menu-divider"></div>
           <div class="menu-section-title">Notifications</div>
           <button type="button" class="menu-item" id="push-toggle-btn">🔔 Enable notifications</button>
+          <form method="post" action="/account/digest/toggle">
+            <button class="menu-item" type="submit">📨 Weekly digest: {{ "On" if user.digest_enabled else "Off" }}</button>
+          </form>
+          <div class="menu-divider"></div>
+          <div class="menu-section-title">Calendar feed</div>
+          <div style="padding: 0 0.6rem 0.5rem;">
+            <input type="text" readonly onclick="this.select()" value="{{ request.url.scheme }}://{{ request.url.netloc }}/calendar/{{ user.calendar_token }}.ics" style="font-size: 0.72rem; padding: 0.4rem 0.5rem;">
+          </div>
+          <form method="post" action="/account/calendar-token/regenerate">
+            <button class="menu-item" type="submit">🔄 Regenerate calendar link</button>
+          </form>
         </div>
       </div>
 
@@ -521,8 +532,11 @@
           <div class="menu-section-title">Signed in as {{ user.username }}</div>
           <div class="menu-divider"></div>
           <a class="menu-item" href="/account/password">🔑 Change password</a>
+          <a class="menu-item" href="/account/export.csv">📊 Export my series</a>
           {% if user.is_admin %}
+          <div class="menu-divider"></div>
           <a class="menu-item" href="/admin/users">🛠️ Manage users</a>
+          <a class="menu-item" href="/admin/health">🩺 Scraper health</a>
           {% endif %}
           <div class="menu-divider"></div>
           <form method="post" action="/logout">

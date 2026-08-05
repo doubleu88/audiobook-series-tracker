@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="block" style="margin-top: 1.5rem;">
+  <p><a href="/import">&larr; Start over</a></p>
+  <div class="section-head">
+    <h2>📋 Review matches</h2>
+  </div>
+  <p class="meta-muted">Uncheck anything that matched wrong, then subscribe to the rest. Lines with no confident match aren't selectable — search for those individually instead.</p>
+
+  <form method="post" action="/import/confirm">
+    <div class="series-table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th></th>
+          <th>You typed</th>
+          <th>Matched to</th>
+          <th>Author</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for result in results %}
+        <tr>
+          <td>
+            {% if result.match and not result.already_subscribed %}
+              <input type="checkbox" name="urls" value="{{ result.match.url }}" checked style="width:auto;">
+            {% endif %}
+          </td>
+          <td class="meta-muted">{{ result.query }}</td>
+          <td>
+            {% if result.match %}
+              <a href="{{ result.match.url }}" target="_blank" rel="noopener">{{ result.match.name }}</a>
+              {% if result.already_subscribed %}<br><span class="badge badge-ended">Already subscribed</span>{% endif %}
+            {% elif result.error %}
+              <span class="error" style="margin:0;">Search failed: {{ result.error }}</span>
+            {% elif result.candidates %}
+              <span class="badge badge-unknown">No confident match</span>
+              <br><span class="meta-muted">candidates: {{ result.candidates|map(attribute="name")|join(", ") }}</span>
+            {% else %}
+              <span class="badge badge-unknown">Not found</span>
+            {% endif %}
+          </td>
+          <td class="meta-muted">{{ result.match.author if result.match else "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <br>
+    <button class="btn" type="submit">Subscribe to checked series</button>
+  </form>
+</section>
+{% endblock %}

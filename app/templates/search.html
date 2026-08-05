@@ -10,7 +10,11 @@
     <input type="text" name="q" value="{{ q }}" placeholder="Series or author name..." required>
     <button class="btn" type="submit">Search</button>
   </form>
-  <p class="meta-muted"><a href="/add">Prefer to paste a series URL directly?</a></p>
+  <p class="meta-muted">
+    <a href="/add">Prefer to paste a series URL directly?</a>
+    &middot;
+    <a href="/import">Importing a list of series?</a>
+  </p>
 
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
 

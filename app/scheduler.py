@@ -2,9 +2,10 @@ import datetime
 import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 from app.db import get_session
-from app.models import Book, PushSubscription, Series, Subscription
+from app.models import Book, PushSubscription, Series, Subscription, User
 from app.push import send_push
 from app.scraper import SeriesPageError, fetch_series
 
@@ -19,7 +20,10 @@ def _pick_icon(books: list[Book]) -> str | None:
 
 
 def _push_to_series_subscribers(session, series: Series, body: str, icon: str | None) -> None:
-    user_ids = [row.user_id for row in session.query(Subscription).filter_by(series_id=series.id).all()]
+    user_ids = [
+        row.user_id
+        for row in session.query(Subscription).filter_by(series_id=series.id, muted=False).all()
+    ]
     if not user_ids:
         return
 
@@ -73,7 +77,15 @@ def refresh_series(series_id: int) -> None:
             scraped = fetch_series(series.url)
         except (SeriesPageError, Exception) as exc:  # noqa: BLE001 - log and move on, don't crash the poll loop
             logger.warning("Failed to refresh series %s (%s): %s", series.name, series.asin, exc)
+            series.consecutive_failures += 1
+            series.last_failure_at = datetime.datetime.utcnow()
+            series.last_failure_reason = str(exc)[:500]
+            session.commit()
             return
+
+        series.consecutive_failures = 0
+        series.last_failure_at = None
+        series.last_failure_reason = None
 
         today = datetime.date.today()
         is_first_scrape = series.last_checked is None
@@ -139,8 +151,53 @@ def refresh_all_series() -> None:
         refresh_series(series_id)
 
 
+def send_weekly_digests() -> None:
+    session = get_session()
+    try:
+        today = datetime.date.today()
+        week_ago_date = today - datetime.timedelta(days=7)
+        week_ago_datetime = datetime.datetime.utcnow() - datetime.timedelta(days=7)
+
+        for user in session.query(User).filter_by(digest_enabled=True).all():
+            series_list = (
+                session.query(Series)
+                .join(Subscription)
+                .filter(Subscription.user_id == user.id, Subscription.muted.is_(False))
+                .all()
+            )
+
+            new_count = 0
+            released_count = 0
+            for series in series_list:
+                for book in series.books:
+                    if book.created_at and book.created_at >= week_ago_datetime:
+                        new_count += 1
+                    if book.release_date and week_ago_date <= book.release_date <= today:
+                        released_count += 1
+
+            if new_count == 0 and released_count == 0:
+                continue
+
+            parts = []
+            if released_count:
+                parts.append(f"{released_count} book{'s' if released_count != 1 else ''} released")
+            if new_count:
+                parts.append(f"{new_count} new book{'s' if new_count != 1 else ''} added")
+            body = " · ".join(parts)
+
+            subscriptions = session.query(PushSubscription).filter_by(user_id=user.id).all()
+            for subscription in subscriptions:
+                alive = send_push(subscription, title="Your weekly digest", body=body, url="/")
+                if not alive:
+                    session.delete(subscription)
+        session.commit()
+    finally:
+        session.close()
+
+
 def start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="UTC")
     scheduler.add_job(refresh_all_series, "interval", hours=24, id="refresh_all_series")
+    scheduler.add_job(send_weekly_digests, CronTrigger(day_of_week="mon", hour=13), id="weekly_digest")
     scheduler.start()
     return scheduler

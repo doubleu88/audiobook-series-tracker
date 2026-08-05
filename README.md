@@ -38,6 +38,21 @@ dates, and cover art.
   platform restriction, not something this app can route around.
 - **Dark mode by default**, with an automatic light-mode fallback based on
   your system preference.
+- **Bulk import** — paste a list of titles (e.g. exported from Goodreads or
+  StoryGraph), each line gets matched against Audible search, and you pick
+  which matches to subscribe to before anything happens.
+- **Mute a series** without unsubscribing — stops push notifications for it
+  and drops it out of the "recently released"/"releasing soon" sections,
+  while keeping it (and its history) in your full list for whenever you
+  catch up.
+- **Weekly digest option** — one push a week summarizing what's new across
+  your subscriptions, for anyone who'd rather not get pinged per-book.
+- **Calendar feed** — a personal `.ics` URL (in Settings) so upcoming release
+  dates show up automatically in Google/Apple Calendar.
+- **Export your subscriptions** to CSV any time.
+- **Scraper health page for admins** (`/admin/health`) — since this whole app
+  depends on scraping, this surfaces any series that have started failing to
+  update instead of silently going stale.
 - Single container, SQLite storage, no external services or API keys required.
 
 ## Screenshots
@@ -61,6 +76,12 @@ dates, and cover art.
 - Series discovery and lookup both scrape Audible's public HTML pages
   directly — `audible.com/series/...` for a series' full book list, and
   `audible.com/search?keywords=...` for the search page.
+- Both of those requests are made by shelling out to `curl` rather than a
+  Python HTTP client. This isn't stylistic — Audible's WAF blocks plain
+  `httpx` requests (confirmed: identical requests via `curl` succeed, while
+  `httpx` and even `curl_cffi` with full Chrome TLS-fingerprint impersonation
+  both get a 503), but the real `curl` binary is unaffected. The Docker image
+  installs `curl` for exactly this reason.
 
 ## Installation
 

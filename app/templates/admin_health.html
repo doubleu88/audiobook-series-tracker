@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="block" style="margin-top: 1.5rem;">
+  <p><a href="/">&larr; Back to dashboard</a></p>
+  <div class="section-head">
+    <h2>🩺 Scraper health</h2>
+  </div>
+  <p class="meta-muted">Series that failed to scrape on their last check, or have never successfully checked at all. A few transient failures are normal; a growing count usually means Audible changed something on that page.</p>
+
+  <div class="section-head" style="margin-top: 1.5rem;">
+    <h2 style="font-size: 0.95rem;">Failing series ({{ unhealthy|length }})</h2>
+  </div>
+  {% if unhealthy %}
+  <div class="series-table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Series</th>
+        <th>Consecutive failures</th>
+        <th>Last failure</th>
+        <th>Last failure reason</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for series in unhealthy %}
+      <tr>
+        <td class="series-name-cell"><a href="{{ series.url }}" target="_blank" rel="noopener">{{ series.name }}</a></td>
+        <td>
+          <span class="badge {{ 'badge-unknown' if series.consecutive_failures < 3 else 'badge-ended' }}">{{ series.consecutive_failures }}</span>
+        </td>
+        <td class="meta-muted">{{ series.last_failure_at.strftime("%Y-%m-%d %H:%M") if series.last_failure_at else "—" }}</td>
+        <td class="meta-muted">{{ series.last_failure_reason or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="empty-hint">Everything's scraping fine.</p>
+  {% endif %}
+
+  <div class="section-head" style="margin-top: 2rem;">
+    <h2 style="font-size: 0.95rem;">Never successfully checked ({{ never_checked|length }})</h2>
+  </div>
+  {% if never_checked %}
+  <div class="series-table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Series</th>
+        <th>Added</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for series in never_checked %}
+      <tr>
+        <td class="series-name-cell"><a href="{{ series.url }}" target="_blank" rel="noopener">{{ series.name }}</a></td>
+        <td class="meta-muted">Subscribed, awaiting first refresh</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="empty-hint">None.</p>
+  {% endif %}
+</section>
+{% endblock %}

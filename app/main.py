@@ -1,9 +1,14 @@
+import csv
 import datetime
+import io
+import secrets
+import time
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Form, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from icalendar import Calendar, Event
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -19,7 +24,7 @@ from app.db import get_session, init_db
 from app.models import PushSubscription, Series, Subscription, User
 from app.push import get_vapid_public_key_b64
 from app.scheduler import refresh_series, start_scheduler
-from app.scraper import SeriesPageError, fetch_series, search_series
+from app.scraper import SeriesPageError, fetch_series, find_best_match, search_series
 from app.timeutil import humanize_relative, shift_months
 
 app = FastAPI(title="Audiobook Series Tracker")
@@ -180,6 +185,102 @@ def account_password_update(
         session.close()
 
 
+@app.get("/account/export.csv")
+def export_subscriptions_csv(user: User = Depends(get_current_user)):
+    session = get_session()
+    try:
+        series_list = (
+            session.query(Series)
+            .join(Subscription)
+            .filter(Subscription.user_id == user.id)
+            .order_by(Series.name)
+            .all()
+        )
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(["Series", "Status", "URL", "Latest Released", "Next Book", "Next Release Date"])
+        for series in series_list:
+            latest_released = next((b for b in reversed(series.books) if b.released), None)
+            upcoming = next((b for b in series.books if not b.released), None)
+            writer.writerow(
+                [
+                    series.name,
+                    "Ended" if series.ended else "Ongoing",
+                    series.url,
+                    latest_released.title if latest_released else "",
+                    upcoming.title if upcoming else "",
+                    upcoming.release_date.isoformat() if upcoming and upcoming.release_date else "",
+                ]
+            )
+        return Response(
+            content=buffer.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=audiobook-subscriptions.csv"},
+        )
+    finally:
+        session.close()
+
+
+@app.get("/calendar/{token}.ics")
+def calendar_feed(token: str):
+    session = get_session()
+    try:
+        user = session.query(User).filter_by(calendar_token=token).first()
+        if user is None:
+            raise HTTPException(status_code=404)
+
+        cal = Calendar()
+        cal.add("prodid", "-//Audiobook Series Tracker//")
+        cal.add("version", "2.0")
+        cal.add("x-wr-calname", "Audiobook Releases")
+
+        series_list = (
+            session.query(Series)
+            .join(Subscription)
+            .filter(Subscription.user_id == user.id, Subscription.muted.is_(False))
+            .all()
+        )
+        for series in series_list:
+            for book in series.books:
+                if book.release_date is None:
+                    continue
+                event = Event()
+                event.add("summary", f"{series.name}: {book.title}")
+                event.add("dtstart", book.release_date)
+                event.add("dtend", book.release_date + datetime.timedelta(days=1))
+                event.add("uid", f"book-{book.id}@audiobook-tracker")
+                event.add("url", book.url)
+                cal.add_component(event)
+
+        return Response(content=bytes(cal.to_ical()), media_type="text/calendar")
+    finally:
+        session.close()
+
+
+@app.post("/account/digest/toggle")
+def toggle_digest(request: Request, user: User = Depends(get_current_user)):
+    session = get_session()
+    try:
+        db_user = session.get(User, user.id)
+        db_user.digest_enabled = not db_user.digest_enabled
+        session.commit()
+    finally:
+        session.close()
+    return RedirectResponse(request.headers.get("referer") or "/", status_code=303)
+
+
+@app.post("/account/calendar-token/regenerate")
+def regenerate_calendar_token(request: Request, user: User = Depends(get_current_user)):
+    session = get_session()
+    try:
+        db_user = session.get(User, user.id)
+        db_user.calendar_token = secrets.token_urlsafe(24)
+        session.commit()
+    finally:
+        session.close()
+    return RedirectResponse(request.headers.get("referer") or "/", status_code=303)
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard(
     request: Request,
@@ -192,8 +293,8 @@ def dashboard(
 
     session = get_session()
     try:
-        series_list = (
-            session.query(Series)
+        series_rows = (
+            session.query(Series, Subscription.muted)
             .join(Subscription)
             .filter(Subscription.user_id == user.id)
             .order_by(Series.name)
@@ -207,7 +308,7 @@ def dashboard(
         recent_books = []
         upcoming_books = []
 
-        for series in series_list:
+        for series, muted in series_rows:
             upcoming = next((b for b in series.books if not b.released), None)
             latest_released = next(
                 (b for b in reversed(series.books) if b.released), None
@@ -219,8 +320,12 @@ def dashboard(
                     "upcoming": upcoming,
                     "latest_released": latest_released,
                     "cover": cover,
+                    "muted": muted,
                 }
             )
+
+            if muted:
+                continue
 
             for book in series.books:
                 if book.release_date is None:
@@ -296,6 +401,26 @@ def search_form(request: Request, q: str | None = None, user: User = Depends(get
     )
 
 
+def _subscribe_to_url(session, user: User, url: str) -> int:
+    """Finds-or-creates the Series for this URL and ensures a Subscription for
+    this user, returning the series id. Raises SeriesPageError if the URL
+    doesn't resolve to a scrapeable series page."""
+    scraped = fetch_series(url)
+
+    series = session.query(Series).filter_by(asin=scraped.asin).first()
+    if series is None:
+        series = Series(asin=scraped.asin, name=scraped.name, url=scraped.url)
+        session.add(series)
+        session.commit()
+
+    already_subscribed = session.query(Subscription).filter_by(user_id=user.id, series_id=series.id).first()
+    if already_subscribed is None:
+        session.add(Subscription(user_id=user.id, series_id=series.id))
+        session.commit()
+
+    return series.id
+
+
 @app.get("/add", response_class=HTMLResponse)
 def add_series_form(request: Request, user: User = Depends(get_current_user)):
     return templates.TemplateResponse("add_series.html", {"request": request, "user": user, "error": None})
@@ -311,30 +436,87 @@ def add_series(
     session = get_session()
     try:
         try:
-            scraped = fetch_series(url)
+            series_id = _subscribe_to_url(session, user, url)
         except SeriesPageError as exc:
             return templates.TemplateResponse(
                 "add_series.html", {"request": request, "user": user, "error": str(exc)}
             )
-
-        series = session.query(Series).filter_by(asin=scraped.asin).first()
-        if series is None:
-            series = Series(asin=scraped.asin, name=scraped.name, url=scraped.url)
-            session.add(series)
-            session.commit()
-
-        already_subscribed = (
-            session.query(Subscription).filter_by(user_id=user.id, series_id=series.id).first()
-        )
-        if already_subscribed is None:
-            session.add(Subscription(user_id=user.id, series_id=series.id))
-            session.commit()
-
-        series_id = series.id
     finally:
         session.close()
 
     background_tasks.add_task(refresh_series, series_id)
+    return RedirectResponse("/", status_code=303)
+
+
+@app.get("/import", response_class=HTMLResponse)
+def import_form(request: Request, user: User = Depends(get_current_user)):
+    return templates.TemplateResponse("import.html", {"request": request, "user": user})
+
+
+@app.post("/import")
+def import_preview(request: Request, lines: str = Form(...), user: User = Depends(get_current_user)):
+    raw_lines = [line.strip() for line in lines.splitlines() if line.strip()][:60]
+
+    session = get_session()
+    try:
+        subscribed_asins = {
+            asin
+            for (asin,) in session.query(Series.asin)
+            .join(Subscription)
+            .filter(Subscription.user_id == user.id)
+            .all()
+        }
+    finally:
+        session.close()
+
+    results = []
+    for index, line in enumerate(raw_lines):
+        if index > 0:
+            # Audible rate-limits rapid-fire search requests — confirmed by hitting a
+            # 503 in testing after a couple of back-to-back calls with no delay.
+            time.sleep(1.0)
+
+        try:
+            candidates = search_series(line)
+        except Exception as exc:  # noqa: BLE001 - surface per-line failures, don't abort the whole batch
+            results.append({"query": line, "match": None, "candidates": [], "error": str(exc)})
+            continue
+
+        best = find_best_match(line, candidates)
+        results.append(
+            {
+                "query": line,
+                "match": best,
+                "candidates": candidates[:5],
+                "already_subscribed": best is not None and best.asin in subscribed_asins,
+                "error": None,
+            }
+        )
+
+    return templates.TemplateResponse(
+        "import_review.html", {"request": request, "user": user, "results": results}
+    )
+
+
+@app.post("/import/confirm")
+def import_confirm(
+    background_tasks: BackgroundTasks,
+    urls: list[str] = Form(default=[]),
+    user: User = Depends(get_current_user),
+):
+    series_ids = []
+    session = get_session()
+    try:
+        for url in urls:
+            try:
+                series_ids.append(_subscribe_to_url(session, user, url))
+            except SeriesPageError:
+                continue
+    finally:
+        session.close()
+
+    for series_id in series_ids:
+        background_tasks.add_task(refresh_series, series_id)
     return RedirectResponse("/", status_code=303)
 
 
@@ -369,6 +551,19 @@ def toggle_ended(series_id: int, user: User = Depends(get_current_user)):
     return RedirectResponse("/", status_code=303)
 
 
+@app.post("/series/{series_id}/toggle-mute")
+def toggle_mute(series_id: int, user: User = Depends(get_current_user)):
+    session = get_session()
+    try:
+        subscription = _require_subscription(session, user, series_id)
+        if subscription is not None:
+            subscription.muted = not subscription.muted
+            session.commit()
+    finally:
+        session.close()
+    return RedirectResponse("/", status_code=303)
+
+
 @app.post("/series/{series_id}/unsubscribe")
 def unsubscribe(series_id: int, user: User = Depends(get_current_user)):
     session = get_session()
@@ -387,6 +582,25 @@ def unsubscribe(series_id: int, user: User = Depends(get_current_user)):
     finally:
         session.close()
     return RedirectResponse("/", status_code=303)
+
+
+@app.get("/admin/health", response_class=HTMLResponse)
+def admin_health(request: Request, admin: User = Depends(require_admin)):
+    session = get_session()
+    try:
+        unhealthy = (
+            session.query(Series)
+            .filter(Series.consecutive_failures > 0)
+            .order_by(Series.consecutive_failures.desc())
+            .all()
+        )
+        never_checked = session.query(Series).filter(Series.last_checked.is_(None)).all()
+        return templates.TemplateResponse(
+            "admin_health.html",
+            {"request": request, "user": admin, "unhealthy": unhealthy, "never_checked": never_checked},
+        )
+    finally:
+        session.close()
 
 
 @app.get("/admin/users", response_class=HTMLResponse)

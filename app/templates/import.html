@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="block" style="margin-top: 1.5rem;">
+  <p><a href="/search">&larr; Back to search</a></p>
+  <div class="section-head">
+    <h2>📋 Bulk import</h2>
+  </div>
+  <p class="meta-muted">
+    Paste a list of series or book titles, one per line (e.g. exported from Goodreads/StoryGraph,
+    or just typed out). Each line will be searched on Audible and matched to a series — you'll get
+    a chance to review and pick which ones to subscribe to before anything happens. Limited to 60
+    lines per import, and searches are paced about a second apart to stay polite to
+    Audible — a full batch can take a minute or two.
+  </p>
+  <form method="post" action="/import">
+    <textarea name="lines" rows="12" required placeholder="Cradle&#10;Dungeon Crawler Carl&#10;Mage Tank
+"
+      style="width:100%; padding:0.6rem 0.7rem; font-size:0.95rem; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-family:inherit;"></textarea>
+    <br><br>
+    <button class="btn" type="submit">Find matches</button>
+  </form>
+</section>
+{% endblock %}

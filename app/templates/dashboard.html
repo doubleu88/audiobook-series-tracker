@@ -108,7 +108,10 @@
             <div class="cover-sm-placeholder">📖</div>
           {% endif %}
         </td>
-        <td class="series-name-cell"><a href="{{ row.series.url }}" target="_blank" rel="noopener">{{ row.series.name }}</a></td>
+        <td class="series-name-cell">
+          <a href="{{ row.series.url }}" target="_blank" rel="noopener">{{ row.series.name }}</a>
+          {% if row.muted %}<span title="Notifications muted">🔇</span>{% endif %}
+        </td>
         <td>
           {% if row.series.ended %}
             <span class="badge badge-ended">Ended</span>
@@ -138,7 +141,12 @@
             <span class="badge badge-unknown">No announced book</span>
           {% endif %}
         </td>
-        <td class="meta-muted">{{ row.series.last_checked.strftime("%Y-%m-%d") if row.series.last_checked else "never" }}</td>
+        <td class="meta-muted">
+          {{ row.series.last_checked.strftime("%Y-%m-%d") if row.series.last_checked else "never" }}
+          {% if row.series.consecutive_failures > 0 %}
+            <br><span class="badge badge-unknown" title="{{ row.series.last_failure_reason }}">⚠️ {{ row.series.consecutive_failures }} failed check{{ "s" if row.series.consecutive_failures != 1 else "" }}</span>
+          {% endif %}
+        </td>
         <td>
           <div class="row-actions">
             <form class="inline" method="post" action="/series/{{ row.series.id }}/refresh">
@@ -146,6 +154,9 @@
             </form>
             <form class="inline" method="post" action="/series/{{ row.series.id }}/toggle-ended">
               <button class="link" type="submit">{{ "Mark ongoing" if row.series.ended else "Mark ended" }}</button>
+            </form>
+            <form class="inline" method="post" action="/series/{{ row.series.id }}/toggle-mute">
+              <button class="link" type="submit">{{ "Unmute" if row.muted else "Mute" }}</button>
             </form>
             <form class="inline" method="post" action="/series/{{ row.series.id }}/unsubscribe"
                   onsubmit="return confirm('Unsubscribe from {{ row.series.name }}?');">
