@@ -20,7 +20,12 @@ from app.scraper import SeriesPageError, fetch_series, search_series
 from app.timeutil import humanize_relative, shift_months
 
 app = FastAPI(title="Audiobook Series Tracker")
-app.add_middleware(SessionMiddleware, secret_key=get_or_create_session_secret())
+ONE_YEAR_SECONDS = 60 * 60 * 24 * 365
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=get_or_create_session_secret(),
+    max_age=ONE_YEAR_SECONDS,
+)
 templates = Jinja2Templates(directory="app/templates")
 
 init_db()
