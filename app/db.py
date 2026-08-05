@@ -24,6 +24,8 @@ def _migrate(conn) -> None:
         user_columns = {col["name"] for col in inspect(conn).get_columns("users")}
         if "is_admin" not in user_columns:
             conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT 0"))
+        if "last_login" not in user_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN last_login DATETIME"))
 
         has_admin = conn.execute(text("SELECT 1 FROM users WHERE is_admin = 1 LIMIT 1")).first()
         if has_admin is None:

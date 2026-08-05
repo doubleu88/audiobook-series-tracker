@@ -15,6 +15,7 @@
         <th>Username</th>
         <th>Role</th>
         <th>Created</th>
+        <th>Last login</th>
         <th></th>
       </tr>
     </thead>
@@ -30,6 +31,7 @@
           {% endif %}
         </td>
         <td class="meta-muted">{{ u.created_at.strftime("%Y-%m-%d") }}</td>
+        <td class="meta-muted">{{ u.last_login.strftime("%Y-%m-%d %H:%M") if u.last_login else "Never" }}</td>
         <td>
           <div class="row-actions">
             <form class="inline" method="post" action="/admin/users/{{ u.id }}/toggle-admin">

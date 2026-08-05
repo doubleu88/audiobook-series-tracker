@@ -73,6 +73,8 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
             return templates.TemplateResponse(
                 "login.html", {"request": request, "error": "Incorrect username or password."}
             )
+        user.last_login = datetime.datetime.utcnow()
+        session.commit()
         request.session["user_id"] = user.id
         return RedirectResponse("/", status_code=303)
     finally:
@@ -112,7 +114,12 @@ def signup(request: Request, username: str = Form(...), password: str = Form(...
         # This is the initial-setup account — the only time /signup is reachable.
         # It becomes admin and inherits any series already sitting in the database
         # (e.g. from an older single-user version of this app).
-        user = User(username=username, password_hash=hash_password(password), is_admin=True)
+        user = User(
+            username=username,
+            password_hash=hash_password(password),
+            is_admin=True,
+            last_login=datetime.datetime.utcnow(),
+        )
         session.add(user)
         session.commit()
 
