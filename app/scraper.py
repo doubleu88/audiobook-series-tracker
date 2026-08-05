@@ -5,9 +5,10 @@
 
 import datetime
 import re
+import subprocess
+import urllib.parse
 from dataclasses import dataclass
 
-import httpx
 from bs4 import BeautifulSoup
 
 USER_AGENT = (
@@ -17,9 +18,45 @@ USER_AGENT = (
 
 ASIN_RE = re.compile(r"/([A-Z0-9]{10})(?:[/?]|$)")
 
+_STATUS_MARKER = "__HTTP_STATUS__"
+
 
 class SeriesPageError(Exception):
     pass
+
+
+def _curl_get(url: str, params: dict[str, str] | None = None) -> str:
+    # Audible's WAF blocks plain httpx requests (confirmed: identical requests via
+    # curl succeed, via httpx/curl_cffi with full Chrome TLS impersonation still get
+    # a 503 — this isn't a simple TLS/JA3 fingerprint thing). Shelling out to the
+    # actual curl binary reliably works, so that's what both scraping paths use.
+    if params:
+        url = f"{url}?{urllib.parse.urlencode(params)}"
+
+    try:
+        result = subprocess.run(
+            [
+                "curl", "-sL",
+                "-A", USER_AGENT,
+                "--max-time", "25",
+                "-w", f"\n{_STATUS_MARKER}%{{http_code}}",
+                url,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise SeriesPageError(f"Request to Audible timed out: {url}") from exc
+
+    if result.returncode != 0:
+        raise SeriesPageError(f"curl failed ({result.returncode}) fetching {url}: {result.stderr.strip()}")
+
+    body, _, status = result.stdout.rpartition(_STATUS_MARKER)
+    if not status.strip().startswith("2"):
+        raise SeriesPageError(f"Audible returned HTTP {status.strip()} for {url}")
+
+    return body
 
 
 @dataclass
@@ -139,10 +176,9 @@ def fetch_series(url_or_asin: str) -> ScrapedSeries:
     asin = extract_series_asin(url_or_asin)
     url = url_or_asin if url_or_asin.startswith("http") else _series_url(asin)
 
-    response = httpx.get(url, headers={"User-Agent": USER_AGENT}, follow_redirects=True, timeout=20.0)
-    response.raise_for_status()
+    html = _curl_get(url)
 
-    return parse_series_page(response.text, fallback_url=url)
+    return parse_series_page(html, fallback_url=url)
 
 
 def _name_from_slug(slug: str) -> str:
@@ -152,16 +188,47 @@ def _name_from_slug(slug: str) -> str:
     return " ".join(words)
 
 
+FOREIGN_EDITION_HINTS = (
+    "french", "german", "spanish", "italian", "portuguese", "japanese",
+    "korean", "chinese", "russian", "polish", "dutch", "edition",
+)
+
+
+def _normalize_for_match(name: str) -> str:
+    name = name.lower().replace("'", "")
+    name = re.sub(r"[^a-z0-9 ]", " ", name)
+    return re.sub(r"\s+", " ", name).strip()
+
+
+def find_best_match(target_name: str, results: list[SeriesSearchResult]) -> SeriesSearchResult | None:
+    """Picks the most likely match for a plain-text series/book name out of a set of
+    search results. Returns None when nothing matches confidently or multiple
+    equally-ranked candidates tie (ambiguous), rather than guessing wrong."""
+    target_norm = _normalize_for_match(target_name)
+    candidates = []
+    for result in results:
+        result_norm = _normalize_for_match(result.name)
+        is_foreign = any(hint in result_norm for hint in FOREIGN_EDITION_HINTS)
+        target_is_foreign = any(hint in target_norm for hint in FOREIGN_EDITION_HINTS)
+        if is_foreign and not target_is_foreign:
+            continue
+        if result_norm == target_norm:
+            candidates.append((0, result))
+        elif target_norm in result_norm or result_norm in target_norm:
+            candidates.append((1, result))
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda pair: (pair[0], len(pair[1].name)))
+    best_rank = candidates[0][0]
+    tied = [result for rank, result in candidates if rank == best_rank]
+    return tied[0] if len(tied) == 1 else None
+
+
 def search_series(query: str) -> list[SeriesSearchResult]:
-    response = httpx.get(
-        "https://www.audible.com/search",
-        params={"keywords": query},
-        headers={"User-Agent": USER_AGENT},
-        follow_redirects=True,
-        timeout=20.0,
-    )
-    response.raise_for_status()
-    soup = BeautifulSoup(response.text, "html.parser")
+    html = _curl_get("https://www.audible.com/search", params={"keywords": query})
+    soup = BeautifulSoup(html, "html.parser")
 
     results: dict[str, SeriesSearchResult] = {}
     for item in soup.select("li.productListItem"):
