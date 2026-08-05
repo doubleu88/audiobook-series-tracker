@@ -38,6 +38,13 @@ def get_current_user(request: Request) -> User:
     return user
 
 
+def require_admin(request: Request) -> User:
+    user = get_current_user(request)
+    if not user.is_admin:
+        raise HTTPException(status_code=404)
+    return user
+
+
 def get_optional_user(request: Request) -> User | None:
     user_id = request.session.get("user_id")
     if user_id is None:

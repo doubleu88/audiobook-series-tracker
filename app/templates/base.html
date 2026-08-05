@@ -339,6 +339,9 @@
     <div class="user-bar">
       {% if user %}
         <span>Signed in as <strong>{{ user.username }}</strong></span>
+        {% if user.is_admin %}
+          <a href="/admin/users">Admin</a>
+        {% endif %}
         <form class="inline" method="post" action="/logout">
           <button class="link" type="submit">Log out</button>
         </form>

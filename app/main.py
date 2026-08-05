@@ -10,6 +10,7 @@ from app.auth import (
     get_optional_user,
     get_or_create_session_secret,
     hash_password,
+    require_admin,
     verify_password,
 )
 from app.db import get_session, init_db
@@ -26,11 +27,22 @@ init_db()
 scheduler = start_scheduler()
 
 
+def _signup_open(session) -> bool:
+    return session.query(User).count() == 0
+
+
 @app.get("/login", response_class=HTMLResponse)
 def login_form(request: Request):
     if get_optional_user(request) is not None:
         return RedirectResponse("/", status_code=303)
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+    session = get_session()
+    try:
+        signup_open = _signup_open(session)
+    finally:
+        session.close()
+    return templates.TemplateResponse(
+        "login.html", {"request": request, "error": None, "signup_open": signup_open}
+    )
 
 
 @app.post("/login")
@@ -52,6 +64,12 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
 def signup_form(request: Request):
     if get_optional_user(request) is not None:
         return RedirectResponse("/", status_code=303)
+    session = get_session()
+    try:
+        if not _signup_open(session):
+            return RedirectResponse("/login", status_code=303)
+    finally:
+        session.close()
     return templates.TemplateResponse("signup.html", {"request": request, "error": None})
 
 
@@ -60,6 +78,9 @@ def signup(request: Request, username: str = Form(...), password: str = Form(...
     username = username.strip()
     session = get_session()
     try:
+        if not _signup_open(session):
+            return RedirectResponse("/login", status_code=303)
+
         if not username or not password:
             return templates.TemplateResponse(
                 "signup.html", {"request": request, "error": "Username and password are required."}
@@ -68,22 +89,18 @@ def signup(request: Request, username: str = Form(...), password: str = Form(...
             return templates.TemplateResponse(
                 "signup.html", {"request": request, "error": "Password must be at least 8 characters."}
             )
-        if session.query(User).filter_by(username=username).first() is not None:
-            return templates.TemplateResponse(
-                "signup.html", {"request": request, "error": "That username is already taken."}
-            )
 
-        is_first_user = session.query(User).count() == 0
-
-        user = User(username=username, password_hash=hash_password(password))
+        # This is the initial-setup account — the only time /signup is reachable.
+        # It becomes admin and inherits any series already sitting in the database
+        # (e.g. from an older single-user version of this app).
+        user = User(username=username, password_hash=hash_password(password), is_admin=True)
         session.add(user)
         session.commit()
 
-        if is_first_user:
-            unclaimed_series = [s for s in session.query(Series).all() if not s.subscriptions]
-            for series in unclaimed_series:
-                session.add(Subscription(user_id=user.id, series_id=series.id))
-            session.commit()
+        unclaimed_series = [s for s in session.query(Series).all() if not s.subscriptions]
+        for series in unclaimed_series:
+            session.add(Subscription(user_id=user.id, series_id=series.id))
+        session.commit()
 
         request.session["user_id"] = user.id
         return RedirectResponse("/", status_code=303)
@@ -304,3 +321,89 @@ def unsubscribe(series_id: int, user: User = Depends(get_current_user)):
     finally:
         session.close()
     return RedirectResponse("/", status_code=303)
+
+
+@app.get("/admin/users", response_class=HTMLResponse)
+def admin_users(request: Request, admin: User = Depends(require_admin)):
+    session = get_session()
+    try:
+        users = session.query(User).order_by(User.created_at).all()
+        return templates.TemplateResponse(
+            "admin_users.html",
+            {"request": request, "user": admin, "users": users, "error": None},
+        )
+    finally:
+        session.close()
+
+
+@app.post("/admin/users")
+def admin_create_user(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    is_admin: bool = Form(False),
+    admin: User = Depends(require_admin),
+):
+    username = username.strip()
+    session = get_session()
+    try:
+        users = session.query(User).order_by(User.created_at).all()
+
+        if not username or not password:
+            error = "Username and password are required."
+        elif len(password) < 8:
+            error = "Password must be at least 8 characters."
+        elif session.query(User).filter_by(username=username).first() is not None:
+            error = "That username is already taken."
+        else:
+            new_user = User(username=username, password_hash=hash_password(password), is_admin=is_admin)
+            session.add(new_user)
+            session.commit()
+            return RedirectResponse("/admin/users", status_code=303)
+
+        return templates.TemplateResponse(
+            "admin_users.html",
+            {"request": request, "user": admin, "users": users, "error": error},
+        )
+    finally:
+        session.close()
+
+
+@app.post("/admin/users/{target_user_id}/toggle-admin")
+def admin_toggle_admin(target_user_id: int, admin: User = Depends(require_admin)):
+    session = get_session()
+    try:
+        target = session.get(User, target_user_id)
+        if target is not None:
+            remaining_admins = session.query(User).filter_by(is_admin=True).count()
+            if not (target.is_admin and remaining_admins <= 1):
+                target.is_admin = not target.is_admin
+                session.commit()
+    finally:
+        session.close()
+    return RedirectResponse("/admin/users", status_code=303)
+
+
+@app.post("/admin/users/{target_user_id}/delete")
+def admin_delete_user(target_user_id: int, admin: User = Depends(require_admin)):
+    session = get_session()
+    try:
+        if target_user_id != admin.id:
+            target = session.get(User, target_user_id)
+            if target is not None:
+                subscribed_series_ids = [
+                    sub.series_id for sub in session.query(Subscription).filter_by(user_id=target.id).all()
+                ]
+                session.delete(target)
+                session.commit()
+
+                for series_id in subscribed_series_ids:
+                    remaining = session.query(Subscription).filter_by(series_id=series_id).count()
+                    if remaining == 0:
+                        series = session.get(Series, series_id)
+                        if series is not None:
+                            session.delete(series)
+                session.commit()
+    finally:
+        session.close()
+    return RedirectResponse("/admin/users", status_code=303)

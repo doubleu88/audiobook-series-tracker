@@ -20,7 +20,11 @@
       </div>
       <button class="btn" type="submit">Log in</button>
     </form>
+    {% if signup_open %}
     <p class="auth-switch">No account yet? <a href="/signup">Sign up</a></p>
+    {% else %}
+    <p class="auth-switch">New accounts are created by an admin.</p>
+    {% endif %}
   </div>
 </div>
 {% endblock %}

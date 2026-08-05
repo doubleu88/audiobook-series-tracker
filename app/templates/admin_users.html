@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="block" style="margin-top: 1.5rem;">
+  <p><a href="/">&larr; Back to dashboard</a></p>
+  <div class="section-head">
+    <h2>🛠️ Manage users</h2>
+  </div>
+
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+  <div class="series-table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Username</th>
+        <th>Role</th>
+        <th>Created</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td class="series-name-cell">{{ u.username }}</td>
+        <td>
+          {% if u.is_admin %}
+            <span class="badge badge-ongoing">Admin</span>
+          {% else %}
+            <span class="badge badge-ended">User</span>
+          {% endif %}
+        </td>
+        <td class="meta-muted">{{ u.created_at.strftime("%Y-%m-%d") }}</td>
+        <td>
+          <div class="row-actions">
+            <form class="inline" method="post" action="/admin/users/{{ u.id }}/toggle-admin">
+              <button class="link" type="submit">{{ "Remove admin" if u.is_admin else "Make admin" }}</button>
+            </form>
+            {% if u.id != user.id %}
+            <form class="inline" method="post" action="/admin/users/{{ u.id }}/delete"
+                  onsubmit="return confirm('Delete user {{ u.username }}? Their subscriptions will be removed.');">
+              <button class="link" type="submit">Delete</button>
+            </form>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  <div class="auth-wrap" style="margin-top: 2rem;">
+    <div class="auth-card">
+      <h2>Create a new user</h2>
+      <form method="post" action="/admin/users">
+        <div class="field">
+          <label for="username">Username</label>
+          <input type="text" id="username" name="username" required autofocus>
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" required minlength="8">
+        </div>
+        <div class="field" style="display:flex; align-items:center; gap:0.5rem;">
+          <input type="checkbox" id="is_admin" name="is_admin" value="true" style="width:auto;">
+          <label for="is_admin" style="margin:0;">Admin</label>
+        </div>
+        <button class="btn" type="submit">Create user</button>
+      </form>
+    </div>
+  </div>
+</section>
+{% endblock %}
