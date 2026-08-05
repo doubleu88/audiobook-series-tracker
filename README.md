@@ -71,7 +71,7 @@ dates, and cover art.
 ### Quick start
 
 ```bash
-git clone https://github.com/ufondu88/audiobook-series-tracker.git
+git clone https://github.com/doubleu88/audiobook-series-tracker.git
 cd audiobook-series-tracker
 docker compose up -d --build
 ```
