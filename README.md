@@ -19,8 +19,11 @@ dates, and cover art.
   admin and can create/promote/delete other users from `/admin/users`; after
   that, public signup closes — there's always at least one admin, so you
   can't lock yourself out.
-- **Search Audible directly** to subscribe — no need to hunt down a series URL
-  yourself (pasting a URL/ASIN is also supported as a fallback).
+- **A top bar with a unified search box** — type to instantly filter your own
+  subscribed series on the dashboard, or hit enter to search Audible and
+  subscribe to something new. Settings (dark/light/auto theme, notifications)
+  and profile (change password, admin panel, log out) live in dropdown menus
+  next to it, and the whole layout is responsive down to phone-sized screens.
 - **Recently released** and **releasing soon** sections on the dashboard,
   each a rolling window (default 3 months, adjustable per-section) across
   every series you're subscribed to.

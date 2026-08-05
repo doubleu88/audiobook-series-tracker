@@ -58,4 +58,84 @@ async function setupPushButton() {
   }
 }
 
-document.addEventListener("DOMContentLoaded", setupPushButton);
+function setupMenus() {
+  const menus = [
+    { btn: "settings-menu-btn", panel: "settings-menu-panel" },
+    { btn: "profile-menu-btn", panel: "profile-menu-panel" },
+  ];
+
+  menus.forEach(({ btn, panel }) => {
+    const btnEl = document.getElementById(btn);
+    const panelEl = document.getElementById(panel);
+    if (!btnEl || !panelEl) return;
+
+    btnEl.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const isOpen = panelEl.classList.contains("open");
+      document.querySelectorAll(".menu-panel.open").forEach((p) => p.classList.remove("open"));
+      if (!isOpen) panelEl.classList.add("open");
+    });
+    panelEl.addEventListener("click", (event) => event.stopPropagation());
+  });
+
+  document.addEventListener("click", () => {
+    document.querySelectorAll(".menu-panel.open").forEach((p) => p.classList.remove("open"));
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      document.querySelectorAll(".menu-panel.open").forEach((p) => p.classList.remove("open"));
+    }
+  });
+}
+
+const THEME_STORAGE_KEY = "abtracker-theme";
+
+function applyTheme(choice) {
+  if (choice === "dark" || choice === "light") {
+    document.documentElement.setAttribute("data-theme", choice);
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+  }
+  document.querySelectorAll(".theme-option").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.themeChoice === choice);
+  });
+}
+
+function setupThemeToggle() {
+  const buttons = document.querySelectorAll(".theme-option");
+  if (!buttons.length) return;
+
+  const stored = localStorage.getItem(THEME_STORAGE_KEY) || "system";
+  applyTheme(stored);
+
+  buttons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const choice = btn.dataset.themeChoice;
+      localStorage.setItem(THEME_STORAGE_KEY, choice);
+      applyTheme(choice);
+    });
+  });
+}
+
+function setupTopbarSearchFilter() {
+  const input = document.getElementById("topbar-search-input");
+  if (!input) return;
+
+  const targets = document.querySelectorAll("[data-series-name]");
+  if (!targets.length) return;
+
+  input.addEventListener("input", () => {
+    const query = input.value.trim().toLowerCase();
+    targets.forEach((el) => {
+      const matches = !query || el.dataset.seriesName.includes(query);
+      el.style.display = matches ? "" : "none";
+    });
+  });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  setupPushButton();
+  setupMenus();
+  setupThemeToggle();
+  setupTopbarSearchFilter();
+});

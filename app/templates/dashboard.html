@@ -15,7 +15,7 @@
   {% if recent_books %}
   <div class="card-grid">
     {% for entry in recent_books %}
-    <div class="card">
+    <div class="card" data-series-name="{{ entry.series.name|lower }}">
       <a href="{{ entry.book.url }}" target="_blank" rel="noopener">
         <div class="cover-wrap">
           {% if entry.book.cover_image %}
@@ -54,7 +54,7 @@
   {% if upcoming_books %}
   <div class="card-grid">
     {% for entry in upcoming_books %}
-    <div class="card">
+    <div class="card" data-series-name="{{ entry.series.name|lower }}">
       <a href="{{ entry.book.url }}" target="_blank" rel="noopener">
         <div class="cover-wrap">
           {% if entry.book.cover_image %}
@@ -100,7 +100,7 @@
     </thead>
     <tbody>
       {% for row in rows %}
-      <tr>
+      <tr data-series-name="{{ row.series.name|lower }}">
         <td>
           {% if row.cover %}
             <img class="cover-sm" src="{{ row.cover }}" alt="">

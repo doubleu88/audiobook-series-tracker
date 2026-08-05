@@ -133,6 +133,46 @@ def logout(request: Request):
     return RedirectResponse("/login", status_code=303)
 
 
+@app.get("/account/password", response_class=HTMLResponse)
+def account_password_form(request: Request, user: User = Depends(get_current_user)):
+    return templates.TemplateResponse(
+        "account_password.html", {"request": request, "user": user, "error": None, "success": False}
+    )
+
+
+@app.post("/account/password")
+def account_password_update(
+    request: Request,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+    user: User = Depends(get_current_user),
+):
+    session = get_session()
+    try:
+        db_user = session.get(User, user.id)
+        error = None
+        if not verify_password(current_password, db_user.password_hash):
+            error = "Current password is incorrect."
+        elif len(new_password) < 8:
+            error = "New password must be at least 8 characters."
+        elif new_password != confirm_password:
+            error = "New password and confirmation don't match."
+
+        if error:
+            return templates.TemplateResponse(
+                "account_password.html", {"request": request, "user": user, "error": error, "success": False}
+            )
+
+        db_user.password_hash = hash_password(new_password)
+        session.commit()
+        return templates.TemplateResponse(
+            "account_password.html", {"request": request, "user": user, "error": None, "success": True}
+        )
+    finally:
+        session.close()
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard(
     request: Request,
