@@ -48,6 +48,19 @@ class Subscription(Base):
     series: Mapped["Series"] = relationship(back_populates="subscriptions")
 
 
+class PushSubscription(Base):
+    __tablename__ = "push_subscriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    endpoint: Mapped[str] = mapped_column(String, unique=True)
+    p256dh: Mapped[str] = mapped_column(String)
+    auth: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=datetime.datetime.utcnow)
+
+    user: Mapped["User"] = relationship()
+
+
 class Book(Base):
     __tablename__ = "books"
 

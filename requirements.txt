@@ -8,3 +8,4 @@ apscheduler==3.10.4
 python-multipart==0.0.9
 bcrypt==4.2.0
 itsdangerous==2.2.0
+pywebpush==2.3.0

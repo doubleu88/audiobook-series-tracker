@@ -4,6 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Audiobook Series Tracker</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#0b0d10">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AB Tracker">
   <style>
     :root {
       --bg: #0b0d10;
@@ -349,6 +355,7 @@
         {% if user.is_admin %}
           <a href="/admin/users">Admin</a>
         {% endif %}
+        <button class="link" type="button" id="push-toggle-btn">🔔 Notifications</button>
         <form class="inline" method="post" action="/logout">
           <button class="link" type="submit">Log out</button>
         </form>
@@ -358,5 +365,8 @@
   </div>
   {% endblock %}
   {% block content %}{% endblock %}
+  {% if user %}
+  <script src="/static/app.js" defer></script>
+  {% endif %}
 </body>
 </html>

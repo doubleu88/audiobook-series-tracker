@@ -1,8 +1,10 @@
 import datetime
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.auth import (
@@ -14,7 +16,8 @@ from app.auth import (
     verify_password,
 )
 from app.db import get_session, init_db
-from app.models import Series, Subscription, User
+from app.models import PushSubscription, Series, Subscription, User
+from app.push import get_vapid_public_key_b64
 from app.scheduler import refresh_series, start_scheduler
 from app.scraper import SeriesPageError, fetch_series, search_series
 from app.timeutil import humanize_relative, shift_months
@@ -27,6 +30,17 @@ app.add_middleware(
     max_age=ONE_YEAR_SECONDS,
 )
 templates = Jinja2Templates(directory="app/templates")
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+
+@app.get("/manifest.json")
+def manifest():
+    return FileResponse("app/static/manifest.json", media_type="application/manifest+json")
+
+
+@app.get("/sw.js")
+def service_worker():
+    return FileResponse("app/static/sw.js", media_type="application/javascript")
 
 init_db()
 scheduler = start_scheduler()
@@ -412,3 +426,52 @@ def admin_delete_user(target_user_id: int, admin: User = Depends(require_admin))
     finally:
         session.close()
     return RedirectResponse("/admin/users", status_code=303)
+
+
+class PushSubscriptionIn(BaseModel):
+    endpoint: str
+    keys: dict[str, str]
+
+
+class PushUnsubscribeIn(BaseModel):
+    endpoint: str
+
+
+@app.get("/push/vapid-public-key")
+def vapid_public_key(user: User = Depends(get_current_user)):
+    return {"key": get_vapid_public_key_b64()}
+
+
+@app.post("/push/subscribe")
+def push_subscribe(payload: PushSubscriptionIn, user: User = Depends(get_current_user)):
+    session = get_session()
+    try:
+        existing = session.query(PushSubscription).filter_by(endpoint=payload.endpoint).first()
+        if existing is None:
+            session.add(
+                PushSubscription(
+                    user_id=user.id,
+                    endpoint=payload.endpoint,
+                    p256dh=payload.keys["p256dh"],
+                    auth=payload.keys["auth"],
+                )
+            )
+        else:
+            existing.user_id = user.id
+            existing.p256dh = payload.keys["p256dh"]
+            existing.auth = payload.keys["auth"]
+        session.commit()
+    finally:
+        session.close()
+    return {"ok": True}
+
+
+@app.post("/push/unsubscribe")
+def push_unsubscribe(payload: PushUnsubscribeIn, user: User = Depends(get_current_user)):
+    session = get_session()
+    try:
+        session.query(PushSubscription).filter_by(endpoint=payload.endpoint, user_id=user.id).delete()
+        session.commit()
+    finally:
+        session.close()
+    return {"ok": True}

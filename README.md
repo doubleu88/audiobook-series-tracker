@@ -28,6 +28,11 @@ dates, and cover art.
 - **Mark a series as ended** — Audible doesn't publish this anywhere, so it's
   a manual toggle.
 - **Daily background refresh** of every subscribed series.
+- **Installable as a PWA** on Android, iOS, and desktop, with **push
+  notifications** when a subscribed series gets a new book or a previously
+  TBD release date gets confirmed. On iOS, push only works after adding the
+  app to your home screen (Share → Add to Home Screen) — that's an Apple
+  platform restriction, not something this app can route around.
 - **Dark mode by default**, with an automatic light-mode fallback based on
   your system preference.
 - Single container, SQLite storage, no external services or API keys required.
@@ -77,9 +82,11 @@ single-user version of this app), and can create further users from
 
 Subscribed series and release data live in `./data/audiobooks.db` (SQLite),
 which is mounted as a volume so it persists across container rebuilds. A
-session-signing secret is generated on first run and stored alongside it at
-`./data/.session_secret` — back both up together if you care about staying
-logged in across reinstalls.
+session-signing secret and a VAPID key pair (for push notifications) are
+each generated on first run and stored alongside it at
+`./data/.session_secret` and `./data/.vapid_private_key.pem` — back all three
+up together, since losing the VAPID key invalidates every existing push
+subscription and losing the session secret logs everyone out.
 
 ### Running without Docker
 
@@ -102,3 +109,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
   family/roommates without open signup, but it also means there's no
   self-service password reset — an admin has to delete and recreate an
   account if someone forgets their password.
+- Push notifications use the standard Web Push API (VAPID), the same
+  mechanism as any other PWA — no third-party push service or account is
+  involved. Notifications fire once a series has been scraped at least once
+  and a *later* refresh finds a new book or a newly-confirmed release date;
+  the initial scrape when you first subscribe never fires one.
