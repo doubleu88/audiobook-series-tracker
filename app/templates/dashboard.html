@@ -30,6 +30,15 @@
         <p class="series-name">{{ entry.series.name }}</p>
         <div class="badge-stack">
           <span class="badge badge-ongoing">{{ entry.relative }}</span>
+          {% if abs_connected %}
+            {% if entry.status and entry.status.in_library %}
+              <span class="badge badge-library">✅ In library</span>
+            {% elif prowlarr_connected %}
+              <a class="btn btn-sm" href="/books/{{ entry.book.id }}/download">⬇️ Download</a>
+            {% else %}
+              <span class="badge badge-unknown">Not in library</span>
+            {% endif %}
+          {% endif %}
         </div>
       </div>
     </div>

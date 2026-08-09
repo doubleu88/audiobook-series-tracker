@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="block" style="margin-top: 1.5rem; max-width: 640px;">
+  <p><a href="/">&larr; Back to dashboard</a></p>
+  <div class="section-head">
+    <h2>🔗 Integrations</h2>
+  </div>
+  <p class="meta-muted">
+    If Audiobookshelf or Prowlarr run on this same machine, use its LAN IP or a Docker network alias for the base
+    URL &mdash; <code>localhost</code> will point at this container instead of the one you mean.
+  </p>
+
+  <div class="series-table-wrap" style="padding: 1.25rem; margin-top: 1.25rem;">
+    <h3 style="margin-top:0;">📚 Audiobookshelf</h3>
+    <p class="meta-muted">Shows which recently-released books you already have, right on the dashboard.</p>
+    {% if abs_error %}<p class="error">{{ abs_error }}</p>{% endif %}
+    <form method="post" action="/account/integrations/audiobookshelf">
+      <div class="field" style="margin-bottom: 0.8rem;">
+        <label class="meta-muted" for="abs_base_url">Base URL</label>
+        <input type="text" id="abs_base_url" name="abs_base_url" placeholder="http://192.168.1.50:13378"
+               value="{{ user.abs_base_url or '' }}" required>
+      </div>
+      <div class="field" style="margin-bottom: 0.8rem;">
+        <label class="meta-muted" for="abs_api_key">API token</label>
+        <input type="text" id="abs_api_key" name="abs_api_key" value="{{ user.abs_api_key or '' }}" required>
+      </div>
+      <button class="btn" type="submit">Save</button>
+    </form>
+
+    {% if abs_libraries %}
+    <form method="post" action="/account/integrations/audiobookshelf/library" style="margin-top: 1rem;">
+      <div class="field" style="margin-bottom: 0.8rem;">
+        <label class="meta-muted" for="abs_library_id">Library to check against</label>
+        <select id="abs_library_id" name="abs_library_id" style="width:100%; padding:0.55rem; border-radius: var(--radius-sm); border:1px solid var(--border); background:var(--surface); color:var(--text);">
+          {% for lib in abs_libraries %}
+          <option value="{{ lib.id }}" {% if lib.id == user.abs_library_id %}selected{% endif %}>{{ lib.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button class="btn" type="submit">Save library</button>
+    </form>
+    {% endif %}
+
+    {% if user.abs_base_url %}
+    <form method="post" action="/account/integrations/audiobookshelf/disconnect" style="margin-top: 0.8rem;">
+      <button class="link" type="submit">Disconnect Audiobookshelf</button>
+    </form>
+    {% endif %}
+  </div>
+
+  <div class="series-table-wrap" style="padding: 1.25rem; margin-top: 1.25rem;">
+    <h3 style="margin-top:0;">⬇️ Prowlarr</h3>
+    <p class="meta-muted">Lets you search and grab a release for a book you don't have yet, straight from the dashboard.</p>
+    {% if prowlarr_error %}<p class="error">{{ prowlarr_error }}</p>{% endif %}
+    {% if prowlarr_ok %}<p class="success-msg">Connected.</p>{% endif %}
+    <form method="post" action="/account/integrations/prowlarr">
+      <div class="field" style="margin-bottom: 0.8rem;">
+        <label class="meta-muted" for="prowlarr_base_url">Base URL</label>
+        <input type="text" id="prowlarr_base_url" name="prowlarr_base_url" placeholder="http://192.168.1.50:9696"
+               value="{{ user.prowlarr_base_url or '' }}" required>
+      </div>
+      <div class="field" style="margin-bottom: 0.8rem;">
+        <label class="meta-muted" for="prowlarr_api_key">API key</label>
+        <input type="text" id="prowlarr_api_key" name="prowlarr_api_key" value="{{ user.prowlarr_api_key or '' }}" required>
+      </div>
+      <button class="btn" type="submit">Save</button>
+    </form>
+    {% if user.prowlarr_base_url %}
+    <form method="post" action="/account/integrations/prowlarr/disconnect" style="margin-top: 0.8rem;">
+      <button class="link" type="submit">Disconnect Prowlarr</button>
+    </form>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

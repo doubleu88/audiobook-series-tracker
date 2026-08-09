@@ -5,6 +5,20 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.1.0] - 2026-08-09
+
+- Connect your own Audiobookshelf instance (per-user, in Profile → Integrations)
+  to see which recently-released books you already have — a background job
+  rechecks your library every 6 hours, and dashboard cards get an "In library"
+  badge once confirmed.
+- Connect your own Prowlarr instance (same Integrations page) to get a
+  "Download" button on books you don't have yet — searches your configured
+  indexers (filtered to the audiobook category) and lets you grab a release,
+  which hands off to your download client. No import/organization is done by
+  this app; that's on Prowlarr's downstream pipeline.
+- Both are entirely optional — a user with neither connected sees no change
+  to the dashboard.
+
 ## [1.0.0] - 2026-08-05
 
 First tagged release. Everything built up to this point, treated as the

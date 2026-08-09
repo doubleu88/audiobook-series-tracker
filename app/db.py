@@ -53,6 +53,16 @@ def _migrate(conn) -> None:
                     {"token": secrets.token_urlsafe(24), "id": row.id},
                 )
             conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_calendar_token ON users (calendar_token)"))
+        if "abs_base_url" not in user_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN abs_base_url VARCHAR"))
+        if "abs_api_key" not in user_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN abs_api_key VARCHAR"))
+        if "abs_library_id" not in user_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN abs_library_id VARCHAR"))
+        if "prowlarr_base_url" not in user_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN prowlarr_base_url VARCHAR"))
+        if "prowlarr_api_key" not in user_columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN prowlarr_api_key VARCHAR"))
 
         has_admin = conn.execute(text("SELECT 1 FROM users WHERE is_admin = 1 LIMIT 1")).first()
         if has_admin is None:

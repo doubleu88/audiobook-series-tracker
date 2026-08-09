@@ -22,6 +22,11 @@ class User(Base):
     calendar_token: Mapped[str] = mapped_column(
         String, unique=True, default=lambda: secrets.token_urlsafe(24)
     )
+    abs_base_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    abs_api_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    abs_library_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    prowlarr_base_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    prowlarr_api_key: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class Series(Base):
@@ -90,3 +95,25 @@ class Book(Base):
     @property
     def released(self) -> bool:
         return self.release_date is not None and self.release_date <= datetime.date.today()
+
+
+class UserBookStatus(Base):
+    """Per-(user, book) external-service facts: is it in this user's Audiobookshelf
+    library, and has a download been requested via Prowlarr. Book/Series rows are
+    shared across subscribers, but library contents and download requests are not —
+    this is the per-user layer over shared Book, the same role Subscription plays
+    over shared Series."""
+
+    __tablename__ = "user_book_status"
+    __table_args__ = (UniqueConstraint("user_id", "book_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey("books.id"), index=True)
+    in_library: Mapped[bool] = mapped_column(Boolean, default=False)
+    checked_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    requested_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    user: Mapped["User"] = relationship()
+    book: Mapped["Book"] = relationship()

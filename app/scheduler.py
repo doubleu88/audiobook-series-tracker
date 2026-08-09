@@ -4,8 +4,9 @@ import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from app.audiobookshelf import ABSClient, ABSError
 from app.db import get_session
-from app.models import Book, PushSubscription, Series, Subscription, User
+from app.models import Book, PushSubscription, Series, Subscription, User, UserBookStatus
 from app.push import send_push
 from app.scraper import SeriesPageError, fetch_series
 
@@ -151,6 +152,61 @@ def refresh_all_series() -> None:
         refresh_series(series_id)
 
 
+def check_availability_for_user(user_id: int) -> None:
+    session = get_session()
+    try:
+        user = session.get(User, user_id)
+        if user is None or not (user.abs_base_url and user.abs_api_key and user.abs_library_id):
+            return
+
+        try:
+            asins = ABSClient(user.abs_base_url, user.abs_api_key).list_asins_in_library(user.abs_library_id)
+        except ABSError as exc:
+            logger.warning("Failed to check Audiobookshelf availability for user %s: %s", user.username, exc)
+            return
+
+        books = (
+            session.query(Book)
+            .join(Series)
+            .join(Subscription)
+            .filter(Subscription.user_id == user.id, Book.release_date.isnot(None))
+            .all()
+        )
+        statuses = {
+            s.book_id: s
+            for s in session.query(UserBookStatus).filter_by(user_id=user.id).all()
+        }
+        now = datetime.datetime.utcnow()
+        for book in books:
+            if not book.released:
+                continue
+            status = statuses.get(book.id)
+            if status is not None and status.in_library:
+                continue  # already confirmed present; a book later removed from ABS won't un-flip here
+            in_library = book.asin.upper() in asins
+            if status is None:
+                status = UserBookStatus(user_id=user.id, book_id=book.id)
+                session.add(status)
+            status.in_library = in_library
+            status.checked_at = now
+        session.commit()
+    finally:
+        session.close()
+
+
+def check_availability_all_users() -> None:
+    session = get_session()
+    try:
+        user_ids = [
+            u.id for u in session.query(User).filter(User.abs_base_url.isnot(None)).all()
+        ]
+    finally:
+        session.close()
+
+    for user_id in user_ids:
+        check_availability_for_user(user_id)
+
+
 def send_weekly_digests() -> None:
     session = get_session()
     try:
@@ -198,6 +254,9 @@ def send_weekly_digests() -> None:
 def start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="UTC")
     scheduler.add_job(refresh_all_series, "interval", hours=24, id="refresh_all_series")
+    scheduler.add_job(
+        check_availability_all_users, "interval", hours=6, id="check_abs_availability"
+    )
     scheduler.add_job(
         send_weekly_digests, CronTrigger(day_of_week="mon", hour=13, timezone="UTC"), id="weekly_digest"
     )

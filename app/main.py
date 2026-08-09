@@ -12,6 +12,7 @@ from icalendar import Calendar, Event
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
+from app.audiobookshelf import ABSClient, ABSError
 from app.auth import (
     get_current_user,
     get_optional_user,
@@ -21,9 +22,10 @@ from app.auth import (
     verify_password,
 )
 from app.db import get_session, init_db
-from app.models import PushSubscription, Series, Subscription, User
+from app.models import Book, PushSubscription, Series, Subscription, User, UserBookStatus
+from app.prowlarr import ProwlarrClient, ProwlarrError
 from app.push import get_vapid_public_key_b64
-from app.scheduler import refresh_series, start_scheduler
+from app.scheduler import check_availability_for_user, refresh_series, start_scheduler
 from app.scraper import SeriesPageError, fetch_series, find_best_match, search_series
 from app.timeutil import humanize_relative, shift_months
 
@@ -281,6 +283,133 @@ def regenerate_calendar_token(request: Request, user: User = Depends(get_current
     return RedirectResponse(request.headers.get("referer") or "/", status_code=303)
 
 
+def _integrations_context(request: Request, user: User, session, abs_error: str | None = None, prowlarr_error: str | None = None) -> dict:
+    db_user = session.get(User, user.id)
+    abs_libraries = []
+    if db_user.abs_base_url and db_user.abs_api_key and abs_error is None:
+        try:
+            abs_libraries = ABSClient(db_user.abs_base_url, db_user.abs_api_key).list_libraries()
+        except ABSError as exc:
+            abs_error = str(exc)
+
+    prowlarr_ok = None
+    if db_user.prowlarr_base_url and db_user.prowlarr_api_key and prowlarr_error is None:
+        try:
+            ProwlarrClient(db_user.prowlarr_base_url, db_user.prowlarr_api_key).test_connection()
+            prowlarr_ok = True
+        except ProwlarrError as exc:
+            prowlarr_error = str(exc)
+
+    return {
+        "request": request,
+        "user": db_user,
+        "abs_libraries": abs_libraries,
+        "abs_error": abs_error,
+        "prowlarr_error": prowlarr_error,
+        "prowlarr_ok": prowlarr_ok,
+    }
+
+
+@app.get("/account/integrations", response_class=HTMLResponse)
+def integrations_form(request: Request, user: User = Depends(get_current_user)):
+    session = get_session()
+    try:
+        context = _integrations_context(request, user, session)
+    finally:
+        session.close()
+    return templates.TemplateResponse("integrations.html", context)
+
+
+@app.post("/account/integrations/audiobookshelf")
+def save_audiobookshelf(
+    request: Request,
+    abs_base_url: str = Form(...),
+    abs_api_key: str = Form(...),
+    user: User = Depends(get_current_user),
+):
+    session = get_session()
+    try:
+        db_user = session.get(User, user.id)
+        db_user.abs_base_url = abs_base_url.strip().rstrip("/")
+        db_user.abs_api_key = abs_api_key.strip()
+        session.commit()
+        context = _integrations_context(request, user, session)
+    finally:
+        session.close()
+    return templates.TemplateResponse("integrations.html", context)
+
+
+@app.post("/account/integrations/audiobookshelf/library")
+def save_audiobookshelf_library(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    abs_library_id: str = Form(...),
+    user: User = Depends(get_current_user),
+):
+    session = get_session()
+    try:
+        db_user = session.get(User, user.id)
+        db_user.abs_library_id = abs_library_id
+        session.commit()
+    finally:
+        session.close()
+    background_tasks.add_task(check_availability_for_user, user.id)
+    return RedirectResponse("/account/integrations", status_code=303)
+
+
+@app.post("/account/integrations/audiobookshelf/disconnect")
+def disconnect_audiobookshelf(user: User = Depends(get_current_user)):
+    session = get_session()
+    try:
+        db_user = session.get(User, user.id)
+        db_user.abs_base_url = None
+        db_user.abs_api_key = None
+        db_user.abs_library_id = None
+        session.query(UserBookStatus).filter_by(user_id=user.id).delete()
+        session.commit()
+    finally:
+        session.close()
+    return RedirectResponse("/account/integrations", status_code=303)
+
+
+@app.post("/account/integrations/prowlarr")
+def save_prowlarr(
+    request: Request,
+    prowlarr_base_url: str = Form(...),
+    prowlarr_api_key: str = Form(...),
+    user: User = Depends(get_current_user),
+):
+    session = get_session()
+    try:
+        db_user = session.get(User, user.id)
+        db_user.prowlarr_base_url = prowlarr_base_url.strip().rstrip("/")
+        db_user.prowlarr_api_key = prowlarr_api_key.strip()
+        session.commit()
+        context = _integrations_context(request, user, session)
+    finally:
+        session.close()
+    return templates.TemplateResponse("integrations.html", context)
+
+
+@app.post("/account/integrations/prowlarr/disconnect")
+def disconnect_prowlarr(user: User = Depends(get_current_user)):
+    session = get_session()
+    try:
+        db_user = session.get(User, user.id)
+        db_user.prowlarr_base_url = None
+        db_user.prowlarr_api_key = None
+        session.commit()
+    finally:
+        session.close()
+    return RedirectResponse("/account/integrations", status_code=303)
+
+
+@app.post("/account/library-status/refresh")
+def refresh_library_status(request: Request, user: User = Depends(get_current_user)):
+    check_availability_for_user(user.id)
+    return RedirectResponse(request.headers.get("referer") or "/", status_code=303)
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard(
     request: Request,
@@ -350,6 +479,22 @@ def dashboard(
         recent_books.sort(key=lambda r: r["book"].release_date, reverse=True)
         upcoming_books.sort(key=lambda r: r["book"].release_date)
 
+        db_user = session.get(User, user.id)
+        abs_connected = bool(db_user.abs_base_url and db_user.abs_library_id)
+        prowlarr_connected = bool(db_user.prowlarr_base_url and db_user.prowlarr_api_key)
+        if abs_connected or prowlarr_connected:
+            statuses = {
+                s.book_id: s
+                for s in session.query(UserBookStatus)
+                .filter(
+                    UserBookStatus.user_id == user.id,
+                    UserBookStatus.book_id.in_([entry["book"].id for entry in recent_books]),
+                )
+                .all()
+            }
+            for entry in recent_books:
+                entry["status"] = statuses.get(entry["book"].id)
+
         return templates.TemplateResponse(
             "dashboard.html",
             {
@@ -360,6 +505,8 @@ def dashboard(
                 "upcoming_books": upcoming_books,
                 "recent_months": recent_months,
                 "upcoming_months": upcoming_months,
+                "abs_connected": abs_connected,
+                "prowlarr_connected": prowlarr_connected,
             },
         )
     finally:
@@ -579,6 +726,79 @@ def unsubscribe(series_id: int, user: User = Depends(get_current_user)):
                 if series is not None:
                     session.delete(series)
                     session.commit()
+    finally:
+        session.close()
+    return RedirectResponse("/", status_code=303)
+
+
+def _require_subscription_for_book(session, user: User, book_id: int) -> Book | None:
+    """Returns the Book if the user is subscribed to its series, else None. Book has
+    no user_id of its own (it's a shared row across subscribers), so every book-scoped
+    action needs this same guard the series-scoped actions below already use."""
+    book = session.get(Book, book_id)
+    if book is None:
+        return None
+    if _require_subscription(session, user, book.series_id) is None:
+        return None
+    return book
+
+
+@app.get("/books/{book_id}/download", response_class=HTMLResponse)
+def download_book_form(request: Request, book_id: int, user: User = Depends(get_current_user)):
+    session = get_session()
+    try:
+        book = _require_subscription_for_book(session, user, book_id)
+        if book is None:
+            return RedirectResponse("/", status_code=303)
+
+        db_user = session.get(User, user.id)
+        if not (db_user.prowlarr_base_url and db_user.prowlarr_api_key):
+            return RedirectResponse("/account/integrations", status_code=303)
+
+        error = None
+        results = []
+        try:
+            results = ProwlarrClient(db_user.prowlarr_base_url, db_user.prowlarr_api_key).search(book.title)
+        except ProwlarrError as exc:
+            error = str(exc)
+
+        return templates.TemplateResponse(
+            "book_download.html",
+            {"request": request, "user": user, "book": book, "results": results, "error": error},
+        )
+    finally:
+        session.close()
+
+
+@app.post("/books/{book_id}/download/grab")
+def download_book_grab(
+    book_id: int,
+    guid: str = Form(...),
+    indexer_id: int = Form(...),
+    user: User = Depends(get_current_user),
+):
+    session = get_session()
+    try:
+        book = _require_subscription_for_book(session, user, book_id)
+        if book is None:
+            return RedirectResponse("/", status_code=303)
+
+        db_user = session.get(User, user.id)
+        if not (db_user.prowlarr_base_url and db_user.prowlarr_api_key):
+            return RedirectResponse("/account/integrations", status_code=303)
+
+        status = session.query(UserBookStatus).filter_by(user_id=user.id, book_id=book.id).first()
+        if status is None:
+            status = UserBookStatus(user_id=user.id, book_id=book.id)
+            session.add(status)
+
+        try:
+            ProwlarrClient(db_user.prowlarr_base_url, db_user.prowlarr_api_key).grab(guid, indexer_id)
+            status.requested_at = datetime.datetime.utcnow()
+            status.last_error = None
+        except ProwlarrError as exc:
+            status.last_error = str(exc)[:500]
+        session.commit()
     finally:
         session.close()
     return RedirectResponse("/", status_code=303)

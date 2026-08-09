@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="block" style="margin-top: 1.5rem;">
+  <p><a href="/">&larr; Back to dashboard</a></p>
+  <div class="section-head">
+    <h2>⬇️ Download &ldquo;{{ book.title }}&rdquo;</h2>
+  </div>
+
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+  {% if not error and not results %}
+  <p class="empty-hint">No releases found on your configured indexers for &ldquo;{{ book.title }}&rdquo;.</p>
+  {% endif %}
+
+  {% if results %}
+  <div class="series-table-wrap" style="margin-top: 1rem;">
+  <table>
+    <thead>
+      <tr>
+        <th>Release</th>
+        <th>Indexer</th>
+        <th>Size</th>
+        <th>Seeders</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for result in results %}
+      <tr>
+        <td>{{ result.title }}</td>
+        <td>{{ result.indexer_name }}</td>
+        <td class="meta-muted">{{ "%.2f"|format(result.size / 1073741824) }} GB</td>
+        <td class="meta-muted">{{ result.seeders if result.seeders is not none else "—" }}</td>
+        <td>
+          <form method="post" action="/books/{{ book.id }}/download/grab">
+            <input type="hidden" name="guid" value="{{ result.guid }}">
+            <input type="hidden" name="indexer_id" value="{{ result.indexer_id }}">
+            <button class="btn" type="submit">Grab</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
