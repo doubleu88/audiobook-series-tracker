@@ -133,9 +133,45 @@ function setupTopbarSearchFilter() {
   });
 }
 
+function setupSortableTables() {
+  document.querySelectorAll("table.sortable").forEach((table) => {
+    const headers = Array.from(table.querySelectorAll("thead th[data-sort-index]"));
+    if (!headers.length) return;
+
+    headers.forEach((th) => {
+      th.classList.add("sortable-col");
+      th.addEventListener("click", () => {
+        const index = parseInt(th.dataset.sortIndex, 10);
+        const dir = th.dataset.sortDir === "asc" ? "desc" : "asc";
+
+        headers.forEach((h) => {
+          delete h.dataset.sortDir;
+          h.querySelector(".sort-indicator")?.remove();
+        });
+        th.dataset.sortDir = dir;
+        const indicator = document.createElement("span");
+        indicator.className = "sort-indicator";
+        indicator.textContent = dir === "asc" ? " ▲" : " ▼";
+        th.appendChild(indicator);
+
+        const tbody = table.querySelector("tbody");
+        const rows = Array.from(tbody.querySelectorAll("tr"));
+        rows.sort((a, b) => {
+          const av = a.children[index].textContent.trim();
+          const bv = b.children[index].textContent.trim();
+          const cmp = av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" });
+          return dir === "asc" ? cmp : -cmp;
+        });
+        rows.forEach((row) => tbody.appendChild(row));
+      });
+    });
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   setupPushButton();
   setupMenus();
   setupThemeToggle();
   setupTopbarSearchFilter();
+  setupSortableTables();
 });

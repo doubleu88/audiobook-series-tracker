@@ -5,6 +5,11 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.3.0] - 2026-08-09
+
+- The Watchlist table's columns (Book, Series, Released) are now sortable —
+  click a header to sort ascending, click again for descending.
+
 ## [1.2.0] - 2026-08-09
 
 - Added a **Watchlist** (📋 in the top bar): a persistent, unbounded list of

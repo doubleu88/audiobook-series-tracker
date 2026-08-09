@@ -361,6 +361,10 @@
     tbody tr { transition: background 0.1s ease; }
     tbody tr:hover { background: var(--surface-hover); }
 
+    th.sortable-col { cursor: pointer; user-select: none; }
+    th.sortable-col:hover { color: var(--text); }
+    th.sortable-col .sort-indicator { color: var(--accent); }
+
     .series-table-wrap {
       background: var(--surface);
       border: 1px solid var(--border);
