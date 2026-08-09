@@ -114,6 +114,8 @@ class UserBookStatus(Base):
     checked_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
     requested_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
     last_error: Mapped[str | None] = mapped_column(String, nullable=True)
+    acknowledged: Mapped[bool] = mapped_column(Boolean, default=False)
+    acknowledged_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
 
     user: Mapped["User"] = relationship()
     book: Mapped["Book"] = relationship()

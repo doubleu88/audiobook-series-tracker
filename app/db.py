@@ -64,6 +64,14 @@ def _migrate(conn) -> None:
         if "prowlarr_api_key" not in user_columns:
             conn.execute(text("ALTER TABLE users ADD COLUMN prowlarr_api_key VARCHAR"))
 
+    if "user_book_status" in inspect(conn).get_table_names():
+        ubs_columns = {col["name"] for col in inspect(conn).get_columns("user_book_status")}
+        if "acknowledged" not in ubs_columns:
+            conn.execute(text("ALTER TABLE user_book_status ADD COLUMN acknowledged BOOLEAN DEFAULT 0"))
+        if "acknowledged_at" not in ubs_columns:
+            conn.execute(text("ALTER TABLE user_book_status ADD COLUMN acknowledged_at DATETIME"))
+
+    if "users" in inspect(conn).get_table_names():
         has_admin = conn.execute(text("SELECT 1 FROM users WHERE is_admin = 1 LIMIT 1")).first()
         if has_admin is None:
             earliest_user_id = conn.execute(

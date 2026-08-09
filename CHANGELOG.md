@@ -5,6 +5,19 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.2.0] - 2026-08-09
+
+- Added a **Watchlist** (📋 in the top bar): a persistent, unbounded list of
+  released books from your subscriptions you haven't dealt with yet. Unlike
+  the dashboard's "recently released" section, nothing falls off this list
+  just because time passed — a book released 6 months ago that you never
+  logged in to see still shows up. Acknowledge one book, or clear the whole
+  list at once. Muted series are excluded, matching how muting already
+  behaves everywhere else in the app.
+- Fixed: disconnecting Audiobookshelf no longer wipes your acknowledgment
+  history — it now only clears the Audiobookshelf-specific fields instead of
+  deleting the whole per-book status row.
+
 ## [1.1.0] - 2026-08-09
 
 - Connect your own Audiobookshelf instance (per-user, in Profile → Integrations)

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="block">
+  <div class="section-head">
+    <h2>📋 Watchlist <span class="meta-muted">({{ entries|length }})</span></h2>
+    {% if entries %}
+    <form method="post" action="/watchlist/acknowledge-all"
+          onsubmit="return confirm('Acknowledge all {{ entries|length }} books?');">
+      <button class="btn" type="submit">Acknowledge all</button>
+    </form>
+    {% endif %}
+  </div>
+  <p class="meta-muted">Released books from your subscriptions you haven't dealt with yet — this list has no
+    time limit, so nothing falls off it just because you haven't logged in for a while.</p>
+
+  {% if entries %}
+  <div class="series-table-wrap" style="margin-top: 1rem;">
+  <table>
+    <thead>
+      <tr>
+        <th></th>
+        <th>Book</th>
+        <th>Series</th>
+        <th>Released</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for entry in entries %}
+      <tr>
+        <td>
+          {% if entry.book.cover_image %}
+            <img class="cover-sm" src="{{ entry.book.cover_image }}" alt="">
+          {% else %}
+            <div class="cover-sm-placeholder">📖</div>
+          {% endif %}
+        </td>
+        <td>
+          <a href="{{ entry.book.url }}" target="_blank" rel="noopener">{{ entry.book.title }}</a>
+        </td>
+        <td class="meta-muted">{{ entry.series.name }}</td>
+        <td class="meta-muted">{{ entry.book.release_date }}</td>
+        <td>
+          <form class="inline" method="post" action="/books/{{ entry.book.id }}/acknowledge">
+            <button class="link" type="submit">Acknowledge</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="empty-hint">You're all caught up.</p>
+  {% endif %}
+</section>
+{% endblock %}

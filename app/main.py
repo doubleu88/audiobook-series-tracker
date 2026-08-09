@@ -365,7 +365,11 @@ def disconnect_audiobookshelf(user: User = Depends(get_current_user)):
         db_user.abs_base_url = None
         db_user.abs_api_key = None
         db_user.abs_library_id = None
-        session.query(UserBookStatus).filter_by(user_id=user.id).delete()
+        # Null only the ABS-specific fields, not the whole row — acknowledged/
+        # requested_at/last_error must survive disconnecting Audiobookshelf.
+        session.query(UserBookStatus).filter_by(user_id=user.id).update(
+            {"in_library": False, "checked_at": None}
+        )
         session.commit()
     finally:
         session.close()
@@ -802,6 +806,78 @@ def download_book_grab(
     finally:
         session.close()
     return RedirectResponse("/", status_code=303)
+
+
+def _watchlist_query(session, user: User):
+    """Released books in the user's non-muted subscriptions with no acknowledged
+    UserBookStatus row. A book with no row at all (e.g. one released long before
+    this feature existed) counts as unacknowledged — no backfill needed."""
+    acknowledged_book_ids = (
+        session.query(UserBookStatus.book_id)
+        .filter(UserBookStatus.user_id == user.id, UserBookStatus.acknowledged.is_(True))
+        .subquery()
+    )
+    return (
+        session.query(Book, Series)
+        .join(Series)
+        .join(Subscription, Subscription.series_id == Series.id)
+        .filter(
+            Subscription.user_id == user.id,
+            Subscription.muted.is_(False),
+            Book.release_date.isnot(None),
+            Book.release_date <= datetime.date.today(),
+            Book.id.notin_(acknowledged_book_ids),
+        )
+        .order_by(Book.release_date.asc())
+    )
+
+
+@app.get("/watchlist", response_class=HTMLResponse)
+def watchlist(request: Request, user: User = Depends(get_current_user)):
+    session = get_session()
+    try:
+        entries = [
+            {"book": book, "series": series} for book, series in _watchlist_query(session, user).all()
+        ]
+        return templates.TemplateResponse(
+            "watchlist.html", {"request": request, "user": user, "entries": entries}
+        )
+    finally:
+        session.close()
+
+
+def _acknowledge_book(session, user: User, book: Book) -> None:
+    status = session.query(UserBookStatus).filter_by(user_id=user.id, book_id=book.id).first()
+    if status is None:
+        status = UserBookStatus(user_id=user.id, book_id=book.id)
+        session.add(status)
+    status.acknowledged = True
+    status.acknowledged_at = datetime.datetime.utcnow()
+
+
+@app.post("/books/{book_id}/acknowledge")
+def acknowledge_book(book_id: int, user: User = Depends(get_current_user)):
+    session = get_session()
+    try:
+        book = _require_subscription_for_book(session, user, book_id)
+        if book is not None:
+            _acknowledge_book(session, user, book)
+            session.commit()
+    finally:
+        session.close()
+    return RedirectResponse("/watchlist", status_code=303)
+
+
+@app.post("/watchlist/acknowledge-all")
+def acknowledge_all(user: User = Depends(get_current_user)):
+    session = get_session()
+    try:
+        for book, _series in _watchlist_query(session, user).all():
+            _acknowledge_book(session, user, book)
+        session.commit()
+    finally:
+        session.close()
+    return RedirectResponse("/watchlist", status_code=303)
 
 
 @app.get("/admin/health", response_class=HTMLResponse)
