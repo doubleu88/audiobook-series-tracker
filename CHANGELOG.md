@@ -5,6 +5,14 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.4.0] - 2026-08-10
+
+- Click a series name on the Watchlist to view just that series, and
+  "Acknowledge all" now scopes to whatever you're currently viewing — so
+  clearing a big backlog for one long-running series no longer requires
+  wading through (or clicking through one-by-one) every other series in
+  your subscriptions.
+
 ## [1.3.0] - 2026-08-09
 
 - The Watchlist table's columns (Book, Series, Released) are now sortable —

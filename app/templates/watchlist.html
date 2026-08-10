@@ -2,16 +2,33 @@
 {% block content %}
 <section class="block">
   <div class="section-head">
-    <h2>📋 Watchlist <span class="meta-muted">({{ entries|length }})</span></h2>
+    <h2>
+      📋
+      {% if filtered_series %}
+        Watchlist &middot; {{ filtered_series.name }}
+      {% else %}
+        Watchlist
+      {% endif %}
+      <span class="meta-muted">({{ entries|length }})</span>
+    </h2>
     {% if entries %}
     <form method="post" action="/watchlist/acknowledge-all"
-          onsubmit="return confirm('Acknowledge all {{ entries|length }} books?');">
-      <button class="btn" type="submit">Acknowledge all</button>
+          onsubmit="return confirm('Acknowledge all {{ entries|length }} book{{ "s" if entries|length != 1 else "" }}{{ " in " + filtered_series.name if filtered_series else "" }}?');">
+      {% if filtered_series %}<input type="hidden" name="series_id" value="{{ filtered_series.id }}">{% endif %}
+      <button class="btn" type="submit">
+        {{ "Acknowledge all in this series" if filtered_series else "Acknowledge all" }}
+      </button>
     </form>
     {% endif %}
   </div>
+
+  {% if filtered_series %}
+  <p class="meta-muted"><a href="/watchlist">&larr; Back to full watchlist</a></p>
+  {% else %}
   <p class="meta-muted">Released books from your subscriptions you haven't dealt with yet — this list has no
-    time limit, so nothing falls off it just because you haven't logged in for a while.</p>
+    time limit, so nothing falls off it just because you haven't logged in for a while. Click a series name to
+    view (and acknowledge) just that series.</p>
+  {% endif %}
 
   {% if entries %}
   <div class="series-table-wrap" style="margin-top: 1rem;">
@@ -38,7 +55,13 @@
         <td>
           <a href="{{ entry.book.url }}" target="_blank" rel="noopener">{{ entry.book.title }}</a>
         </td>
-        <td class="meta-muted">{{ entry.series.name }}</td>
+        <td class="meta-muted">
+          {% if filtered_series %}
+            {{ entry.series.name }}
+          {% else %}
+            <a href="/watchlist?series_id={{ entry.series.id }}">{{ entry.series.name }}</a>
+          {% endif %}
+        </td>
         <td class="meta-muted">{{ entry.book.release_date }}</td>
         <td>
           <form class="inline" method="post" action="/books/{{ entry.book.id }}/acknowledge">
@@ -51,7 +74,9 @@
   </table>
   </div>
   {% else %}
-  <p class="empty-hint">You're all caught up.</p>
+  <p class="empty-hint">
+    {% if filtered_series %}You're all caught up on {{ filtered_series.name }}.{% else %}You're all caught up.{% endif %}
+  </p>
   {% endif %}
 </section>
 {% endblock %}

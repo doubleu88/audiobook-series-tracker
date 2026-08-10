@@ -808,16 +808,17 @@ def download_book_grab(
     return RedirectResponse("/", status_code=303)
 
 
-def _watchlist_query(session, user: User):
+def _watchlist_query(session, user: User, series_id: int | None = None):
     """Released books in the user's non-muted subscriptions with no acknowledged
     UserBookStatus row. A book with no row at all (e.g. one released long before
-    this feature existed) counts as unacknowledged — no backfill needed."""
+    this feature existed) counts as unacknowledged — no backfill needed. Optionally
+    scoped to a single series, for the per-series view/bulk-acknowledge."""
     acknowledged_book_ids = (
         session.query(UserBookStatus.book_id)
         .filter(UserBookStatus.user_id == user.id, UserBookStatus.acknowledged.is_(True))
         .subquery()
     )
-    return (
+    query = (
         session.query(Book, Series)
         .join(Series)
         .join(Subscription, Subscription.series_id == Series.id)
@@ -828,19 +829,34 @@ def _watchlist_query(session, user: User):
             Book.release_date <= datetime.date.today(),
             Book.id.notin_(acknowledged_book_ids),
         )
-        .order_by(Book.release_date.asc())
     )
+    if series_id is not None:
+        query = query.filter(Series.id == series_id)
+    return query.order_by(Book.release_date.asc())
 
 
 @app.get("/watchlist", response_class=HTMLResponse)
-def watchlist(request: Request, user: User = Depends(get_current_user)):
+def watchlist(request: Request, series_id: int | None = None, user: User = Depends(get_current_user)):
     session = get_session()
     try:
-        entries = [
-            {"book": book, "series": series} for book, series in _watchlist_query(session, user).all()
-        ]
+        rows = _watchlist_query(session, user, series_id=series_id).all()
+        entries = [{"book": book, "series": series} for book, series in rows]
+        filtered_series = None
+        if series_id is not None:
+            filtered_series = entries[0]["series"] if entries else (
+                session.query(Series)
+                .join(Subscription)
+                .filter(Series.id == series_id, Subscription.user_id == user.id)
+                .first()
+            )
         return templates.TemplateResponse(
-            "watchlist.html", {"request": request, "user": user, "entries": entries}
+            "watchlist.html",
+            {
+                "request": request,
+                "user": user,
+                "entries": entries,
+                "filtered_series": filtered_series,
+            },
         )
     finally:
         session.close()
@@ -869,15 +885,16 @@ def acknowledge_book(book_id: int, user: User = Depends(get_current_user)):
 
 
 @app.post("/watchlist/acknowledge-all")
-def acknowledge_all(user: User = Depends(get_current_user)):
+def acknowledge_all(series_id: int | None = Form(None), user: User = Depends(get_current_user)):
     session = get_session()
     try:
-        for book, _series in _watchlist_query(session, user).all():
+        for book, _series in _watchlist_query(session, user, series_id=series_id).all():
             _acknowledge_book(session, user, book)
         session.commit()
     finally:
         session.close()
-    return RedirectResponse("/watchlist", status_code=303)
+    redirect_url = f"/watchlist?series_id={series_id}" if series_id is not None else "/watchlist"
+    return RedirectResponse(redirect_url, status_code=303)
 
 
 @app.get("/admin/health", response_class=HTMLResponse)
