@@ -5,6 +5,16 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.4.1] - 2026-08-10
+
+- Fixed duplicate books showing up (most visibly on the Watchlist): Audible's
+  series pages sometimes list the same book twice under different ASINs (a
+  second edition/format that isn't inside the numbered "Book N" listing).
+  The scraper now keeps one entry per title per series, preferring the
+  positioned (numbered) listing. Also cleaned up 81 existing duplicate rows
+  already in the database — any per-book status (in-library, acknowledged,
+  download requests) on either duplicate was merged, not lost.
+
 ## [1.4.0] - 2026-08-10
 
 - Click a series name on the Watchlist to view just that series, and

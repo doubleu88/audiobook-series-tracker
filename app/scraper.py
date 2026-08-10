@@ -121,6 +121,30 @@ def _parse_position(item) -> float | None:
         return None
 
 
+def _dedupe_by_title(books: list[ScrapedBook]) -> list[ScrapedBook]:
+    """Audible's series pages sometimes list the same book twice under different
+    ASINs — a second edition/format callout that isn't inside the "Book N"
+    heading the position parser looks for, so it comes through with
+    position=None alongside the real, positioned entry. Keep one entry per
+    title: prefer whichever has a position (the one actually placed in the
+    numbered list), otherwise keep the first one encountered (stable across
+    re-scrapes since page DOM order doesn't change)."""
+    best_by_title: dict[str, ScrapedBook] = {}
+    for book in books:
+        existing = best_by_title.get(book.title)
+        if existing is None or (existing.position is None and book.position is not None):
+            best_by_title[book.title] = book
+
+    deduped: list[ScrapedBook] = []
+    seen_titles: set[str] = set()
+    for book in books:
+        if book.title in seen_titles:
+            continue
+        seen_titles.add(book.title)
+        deduped.append(best_by_title[book.title])
+    return deduped
+
+
 def parse_series_page(html: str, fallback_url: str) -> ScrapedSeries:
     soup = BeautifulSoup(html, "html.parser")
 
@@ -165,6 +189,8 @@ def parse_series_page(html: str, fallback_url: str) -> ScrapedSeries:
 
     if not books:
         raise SeriesPageError("No books found on series page — page layout may have changed.")
+
+    books = _dedupe_by_title(books)
 
     series_asin_match = ASIN_RE.search(fallback_url)
     series_asin = series_asin_match.group(1) if series_asin_match else fallback_url
