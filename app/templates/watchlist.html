@@ -65,6 +65,7 @@
         <td class="meta-muted">{{ entry.book.release_date }}</td>
         <td>
           <form class="inline" method="post" action="/books/{{ entry.book.id }}/acknowledge">
+            {% if filtered_series %}<input type="hidden" name="series_id" value="{{ filtered_series.id }}">{% endif %}
             <button class="link" type="submit">Acknowledge</button>
           </form>
         </td>

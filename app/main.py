@@ -872,7 +872,7 @@ def _acknowledge_book(session, user: User, book: Book) -> None:
 
 
 @app.post("/books/{book_id}/acknowledge")
-def acknowledge_book(book_id: int, user: User = Depends(get_current_user)):
+def acknowledge_book(book_id: int, series_id: int | None = Form(None), user: User = Depends(get_current_user)):
     session = get_session()
     try:
         book = _require_subscription_for_book(session, user, book_id)
@@ -881,7 +881,11 @@ def acknowledge_book(book_id: int, user: User = Depends(get_current_user)):
             session.commit()
     finally:
         session.close()
-    return RedirectResponse("/watchlist", status_code=303)
+    # Acknowledging one book from a filtered series view should stay on that
+    # series so the user can keep clicking through it, not bounce to the
+    # full mixed watchlist.
+    redirect_url = f"/watchlist?series_id={series_id}" if series_id is not None else "/watchlist"
+    return RedirectResponse(redirect_url, status_code=303)
 
 
 @app.post("/watchlist/acknowledge-all")
@@ -893,8 +897,10 @@ def acknowledge_all(series_id: int | None = Form(None), user: User = Depends(get
         session.commit()
     finally:
         session.close()
-    redirect_url = f"/watchlist?series_id={series_id}" if series_id is not None else "/watchlist"
-    return RedirectResponse(redirect_url, status_code=303)
+    # Unlike acknowledging a single book, this always empties whatever scope
+    # it was run in — redirecting back to that (now-empty) filtered view
+    # would show a dead end, so always land on the full watchlist instead.
+    return RedirectResponse("/watchlist", status_code=303)
 
 
 @app.get("/admin/health", response_class=HTMLResponse)

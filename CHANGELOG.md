@@ -5,6 +5,14 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.4.2] - 2026-08-11
+
+- Fixed backwards redirects on the per-series Watchlist view: acknowledging
+  a single book from a filtered series now stays on that series (so you can
+  keep clicking through it) instead of bouncing to the full mixed
+  watchlist; "Acknowledge all" from a filtered series now goes to the full
+  watchlist instead of redrawing the series view it just emptied.
+
 ## [1.4.1] - 2026-08-10
 
 - Fixed duplicate books showing up (most visibly on the Watchlist): Audible's
