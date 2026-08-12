@@ -1,5 +1,6 @@
 import datetime
 import logging
+import time
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -148,7 +149,14 @@ def refresh_all_series() -> None:
     finally:
         session.close()
 
-    for series_id in series_ids:
+    for index, series_id in enumerate(series_ids):
+        if index > 0:
+            # Audible rate-limits rapid-fire requests — same reasoning as the
+            # sleep in main.py's bulk import flow. Without this, refreshing a
+            # full subscription list back-to-back starts intermittently
+            # failing partway through with a generic "No books found" error
+            # that has nothing to do with the actual page content.
+            time.sleep(1.0)
         refresh_series(series_id)
 
 

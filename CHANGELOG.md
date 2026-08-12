@@ -5,6 +5,17 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.4.3] - 2026-08-12
+
+- Fixed spurious "failed check" warnings on the scraper health page for
+  series that were actually fine. The daily background refresh hit Audible
+  for every subscribed series back-to-back with no delay between requests,
+  which is exactly the pattern Audible's rate limiter has always rejected
+  elsewhere in this app (the bulk-import flow already sleeps between
+  requests for the same reason) — a request that landed mid-rate-limit got
+  an empty response and was misreported as "page layout may have changed."
+  The daily refresh now paces requests the same way import already does.
+
 ## [1.4.2] - 2026-08-11
 
 - Fixed backwards redirects on the per-series Watchlist view: acknowledging
