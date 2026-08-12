@@ -75,13 +75,28 @@ def refresh_series(series_id: int) -> None:
         if series is None:
             return
 
-        try:
-            scraped = fetch_series(series.url)
-        except (SeriesPageError, Exception) as exc:  # noqa: BLE001 - log and move on, don't crash the poll loop
-            logger.warning("Failed to refresh series %s (%s): %s", series.name, series.asin, exc)
+        # Audible's WAF is flaky in a way that isn't purely rate-limit-shaped —
+        # the same ASIN can fail outright while others succeed at the same
+        # delay, and vice versa (confirmed empirically: retrying a "failed"
+        # series standalone moments later succeeds with no code change). A
+        # few retries with a real gap between them clears most of these
+        # without ever marking the series as actually broken.
+        scraped = None
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            if attempt > 0:
+                time.sleep(3.0)
+            try:
+                scraped = fetch_series(series.url)
+                break
+            except (SeriesPageError, Exception) as exc:  # noqa: BLE001 - retry, then log and move on
+                last_exc = exc
+
+        if scraped is None:
+            logger.warning("Failed to refresh series %s (%s): %s", series.name, series.asin, last_exc)
             series.consecutive_failures += 1
             series.last_failure_at = datetime.datetime.utcnow()
-            series.last_failure_reason = str(exc)[:500]
+            series.last_failure_reason = str(last_exc)[:500]
             session.commit()
             return
 

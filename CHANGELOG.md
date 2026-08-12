@@ -5,6 +5,17 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.4.4] - 2026-08-12
+
+- The 1.4.3 fix (pacing requests during the daily refresh) helped but
+  didn't fully solve the false "failed check" problem — further testing
+  showed Audible's WAF fails intermittently in a way that isn't purely
+  rate-limit/timing-shaped (the same series can fail consistently while
+  others succeed at an identical delay). `refresh_series` now retries a
+  failed fetch up to 2 more times (3s apart) before actually recording it
+  as a failure — verified this clears every series that was previously
+  misreported as broken.
+
 ## [1.4.3] - 2026-08-12
 
 - Fixed spurious "failed check" warnings on the scraper health page for
