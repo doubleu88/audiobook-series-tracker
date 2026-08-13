@@ -464,13 +464,15 @@ def dashboard(
                 if book.release_date is None:
                     continue
                 if recent_cutoff <= book.release_date <= today:
-                    recent_books.append(
-                        {
-                            "book": book,
-                            "series": series,
-                            "relative": humanize_relative((book.release_date - today).days),
-                        }
-                    )
+                    status = session.query(UserBookStatus).filter_by(user_id=user.id, book_id=book.id).first()
+                    if not status or not status.acknowledged:
+                        recent_books.append(
+                            {
+                                "book": book,
+                                "series": series,
+                                "relative": humanize_relative((book.release_date - today).days),
+                            }
+                        )
                 elif today < book.release_date <= upcoming_cutoff:
                     upcoming_books.append(
                         {
