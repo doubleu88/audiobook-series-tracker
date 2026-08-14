@@ -441,6 +441,13 @@ def dashboard(
         recent_books = []
         upcoming_books = []
 
+        acknowledged_book_ids = {
+            row.book_id
+            for row in session.query(UserBookStatus.book_id)
+            .filter(UserBookStatus.user_id == user.id, UserBookStatus.acknowledged.is_(True))
+            .all()
+        }
+
         for series, muted in series_rows:
             upcoming = next((b for b in series.books if not b.released), None)
             latest_released = next(
@@ -464,8 +471,7 @@ def dashboard(
                 if book.release_date is None:
                     continue
                 if recent_cutoff <= book.release_date <= today:
-                    status = session.query(UserBookStatus).filter_by(user_id=user.id, book_id=book.id).first()
-                    if not status or not status.acknowledged:
+                    if book.id not in acknowledged_book_ids:
                         recent_books.append(
                             {
                                 "book": book,

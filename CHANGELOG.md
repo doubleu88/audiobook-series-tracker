@@ -5,6 +5,15 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.5.0] - 2026-08-14
+
+- The "Recently released" dashboard section now hides books you've already
+  acknowledged (via the Watchlist), so it doesn't stay cluttered with
+  things you've already dealt with. Contributed by @wtanksleyjr (#2).
+- Internal: that filter now does one bulk query for the user's acknowledged
+  books instead of one query per book, reusing the same pattern already
+  used elsewhere in this route.
+
 ## [1.4.4] - 2026-08-12
 
 - The 1.4.3 fix (pacing requests during the daily refresh) helped but
