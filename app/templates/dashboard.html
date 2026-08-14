@@ -4,18 +4,24 @@
 <section class="block">
   <div class="section-head">
     <h2>🆕 Recently released</h2>
-    <form class="threshold-form" method="get" action="/">
-      <input type="hidden" name="upcoming_months" value="{{ upcoming_months }}">
-      last
-      <input type="number" name="recent_months" min="1" max="24" value="{{ recent_months }}">
-      months
-      <button type="submit">Apply</button>
-    </form>
+    <div style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">
+      <label class="meta-muted" style="display:flex; align-items:center; gap:0.35rem; font-size:0.8rem; cursor:pointer;">
+        <input type="checkbox" id="hide-acknowledged-toggle" checked>
+        Hide acknowledged
+      </label>
+      <form class="threshold-form" method="get" action="/">
+        <input type="hidden" name="upcoming_months" value="{{ upcoming_months }}">
+        last
+        <input type="number" name="recent_months" min="1" max="24" value="{{ recent_months }}">
+        months
+        <button type="submit">Apply</button>
+      </form>
+    </div>
   </div>
   {% if recent_books %}
-  <div class="card-grid">
+  <div class="card-grid" id="recent-books-grid">
     {% for entry in recent_books %}
-    <div class="card" data-series-name="{{ entry.series.name|lower }}">
+    <div class="card" data-series-name="{{ entry.series.name|lower }}" data-acknowledged="{{ 'true' if entry.acknowledged else 'false' }}">
       <a href="{{ entry.book.url }}" target="_blank" rel="noopener">
         <div class="cover-wrap">
           {% if entry.book.cover_image %}
@@ -44,6 +50,7 @@
     </div>
     {% endfor %}
   </div>
+  <p class="empty-hint" id="recent-books-all-hidden-hint" style="display:none;"></p>
   {% else %}
   <p class="empty-hint">No books released in the last {{ recent_months }} months across your subscribed series.</p>
   {% endif %}

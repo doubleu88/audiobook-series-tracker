@@ -117,19 +117,43 @@ function setupThemeToggle() {
   });
 }
 
+// The search filter and the "hide acknowledged" toggle both hide/show the
+// same [data-series-name] elements (recently-released cards in particular
+// are covered by both). Two independent handlers each setting el.style.display
+// would fight each other — whichever ran last would win outright, ignoring
+// the other's condition. Instead, both conditions are combined here: an
+// element shows only if it passes the search AND isn't hidden-by-acknowledged.
+let searchQuery = "";
+let hideAcknowledged = true;
+
+function applyCombinedVisibility() {
+  document.querySelectorAll("[data-series-name]").forEach((el) => {
+    const searchOk = !searchQuery || el.dataset.seriesName.includes(searchQuery);
+    const ackOk = !(hideAcknowledged && el.dataset.acknowledged === "true");
+    el.style.display = searchOk && ackOk ? "" : "none";
+  });
+  const hint = document.getElementById("recent-books-all-hidden-hint");
+  const grid = document.getElementById("recent-books-grid");
+  if (hint && grid) {
+    const cards = grid.querySelectorAll(".card");
+    const anyVisible = Array.from(cards).some((card) => card.style.display !== "none");
+    if (cards.length && !anyVisible) {
+      hint.textContent = searchQuery
+        ? "No recently released books match your search."
+        : "All caught up — every book in this window is acknowledged. Toggle “Hide acknowledged” off to see them.";
+      hint.style.display = "";
+    } else {
+      hint.style.display = "none";
+    }
+  }
+}
+
 function setupTopbarSearchFilter() {
   const input = document.getElementById("topbar-search-input");
   if (!input) return;
-
-  const targets = document.querySelectorAll("[data-series-name]");
-  if (!targets.length) return;
-
   input.addEventListener("input", () => {
-    const query = input.value.trim().toLowerCase();
-    targets.forEach((el) => {
-      const matches = !query || el.dataset.seriesName.includes(query);
-      el.style.display = matches ? "" : "none";
-    });
+    searchQuery = input.value.trim().toLowerCase();
+    applyCombinedVisibility();
   });
 }
 
@@ -168,10 +192,29 @@ function setupSortableTables() {
   });
 }
 
+const HIDE_ACKNOWLEDGED_STORAGE_KEY = "abtracker-hide-acknowledged";
+
+function setupAcknowledgedToggle() {
+  const checkbox = document.getElementById("hide-acknowledged-toggle");
+  if (!checkbox) return;
+
+  const stored = localStorage.getItem(HIDE_ACKNOWLEDGED_STORAGE_KEY);
+  hideAcknowledged = stored === null ? true : stored === "true";
+  checkbox.checked = hideAcknowledged;
+  applyCombinedVisibility();
+
+  checkbox.addEventListener("change", () => {
+    hideAcknowledged = checkbox.checked;
+    localStorage.setItem(HIDE_ACKNOWLEDGED_STORAGE_KEY, hideAcknowledged ? "true" : "false");
+    applyCombinedVisibility();
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   setupPushButton();
   setupMenus();
   setupThemeToggle();
+  setupAcknowledgedToggle();
   setupTopbarSearchFilter();
   setupSortableTables();
 });

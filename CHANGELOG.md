@@ -5,6 +5,15 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.6.0] - 2026-08-14
+
+- Added a "Hide acknowledged" toggle to the Recently released section —
+  the checkbox @wtanksleyjr wondered about in #2. On by default (matching
+  1.5.0's behavior), remembered across visits, and instant (no page
+  reload). Combines correctly with the top-bar series search — searching
+  and hiding acknowledged books both apply at once rather than one
+  overriding the other.
+
 ## [1.5.0] - 2026-08-14
 
 - The "Recently released" dashboard section now hides books you've already
