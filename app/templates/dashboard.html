@@ -108,6 +108,7 @@
         <th></th>
         <th>Series</th>
         <th>Status</th>
+        <th>#tracking</th>
         <th>Latest released</th>
         <th>Next book</th>
         <th>Last checked</th>
@@ -134,6 +135,9 @@
           {% else %}
             <span class="badge badge-ongoing">Ongoing</span>
           {% endif %}
+        </td>
+        <td>
+          <a href="/watchlist?series_id={{ row.series.id }}">{{ row.watchlist_count }} / {{ row.released_count }}</a>
         </td>
         <td>
           {% if row.latest_released %}
