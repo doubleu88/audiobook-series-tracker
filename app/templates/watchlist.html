@@ -9,17 +9,23 @@
       {% else %}
         Watchlist
       {% endif %}
-      <span class="meta-muted">({{ entries|length }})</span>
+      <span class="meta-muted">({{ unacknowledged_count }} / {{ entries|length }})</span>
     </h2>
-    {% if entries %}
-    <form method="post" action="/watchlist/acknowledge-all"
-          onsubmit="return confirm('Acknowledge all {{ entries|length }} book{{ "s" if entries|length != 1 else "" }}{{ " in " + filtered_series.name if filtered_series else "" }}?');">
-      {% if filtered_series %}<input type="hidden" name="series_id" value="{{ filtered_series.id }}">{% endif %}
-      <button class="btn" type="submit">
-        {{ "Acknowledge all in this series" if filtered_series else "Acknowledge all" }}
-      </button>
-    </form>
-    {% endif %}
+    <div style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">
+      <label class="meta-muted" style="display:flex; align-items:center; gap:0.35rem; font-size:0.8rem; cursor:pointer;">
+        <input type="checkbox" id="hide-acknowledged-toggle" checked>
+        Hide acknowledged
+      </label>
+      {% if unacknowledged_count > 0 %}
+      <form method="post" action="/watchlist/acknowledge-all"
+            onsubmit="return confirm('Acknowledge all {{ unacknowledged_count }} book{{ "s" if unacknowledged_count != 1 else "" }}{{ " in " + filtered_series.name if filtered_series else "" }}?');">
+        {% if filtered_series %}<input type="hidden" name="series_id" value="{{ filtered_series.id }}">{% endif %}
+        <button class="btn" type="submit">
+          {{ "Acknowledge all in this series" if filtered_series else "Acknowledge all" }}
+        </button>
+      </form>
+      {% endif %}
+    </div>
   </div>
 
   {% if filtered_series %}
@@ -31,7 +37,7 @@
   {% endif %}
 
   {% if entries %}
-  <div class="series-table-wrap" style="margin-top: 1rem;">
+  <div class="series-table-wrap" id="watchlist-table-wrap" style="margin-top: 1rem;">
   <table class="sortable">
     <thead>
       <tr>
@@ -44,7 +50,7 @@
     </thead>
     <tbody>
       {% for entry in entries %}
-      <tr>
+      <tr data-series-name="{{ entry.series.name|lower }}" data-acknowledged="{{ 'true' if entry.acknowledged else 'false' }}"{% if entry.acknowledged %} class="row-acknowledged"{% endif %}>
         <td>
           {% if entry.book.cover_image %}
             <img class="cover-sm" src="{{ entry.book.cover_image }}" alt="">
@@ -64,16 +70,24 @@
         </td>
         <td class="meta-muted">{{ entry.book.release_date }}</td>
         <td>
+          {% if entry.acknowledged %}
+          <form class="inline" method="post" action="/books/{{ entry.book.id }}/unacknowledge">
+            {% if filtered_series %}<input type="hidden" name="series_id" value="{{ filtered_series.id }}">{% endif %}
+            <button class="link" type="submit">Watch</button>
+          </form>
+          {% else %}
           <form class="inline" method="post" action="/books/{{ entry.book.id }}/acknowledge">
             {% if filtered_series %}<input type="hidden" name="series_id" value="{{ filtered_series.id }}">{% endif %}
             <button class="link" type="submit">Acknowledge</button>
           </form>
+          {% endif %}
         </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   </div>
+  <p class="empty-hint" id="watchlist-all-hidden-hint" style="display:none; margin-top: 1rem;"></p>
   {% else %}
   <p class="empty-hint">
     {% if filtered_series %}You're all caught up on {{ filtered_series.name }}.{% else %}You're all caught up.{% endif %}

@@ -146,6 +146,22 @@ function applyCombinedVisibility() {
       hint.style.display = "none";
     }
   }
+  const watchlistHint = document.getElementById("watchlist-all-hidden-hint");
+  const watchlistWrap = document.getElementById("watchlist-table-wrap");
+  if (watchlistHint && watchlistWrap) {
+    const rows = watchlistWrap.querySelectorAll("tbody tr");
+    const anyVisible = Array.from(rows).some((row) => row.style.display !== "none");
+    if (rows.length && !anyVisible) {
+      watchlistHint.textContent = searchQuery
+        ? "No watchlist books match your search."
+        : "All caught up — every book in this view is acknowledged. Toggle “Hide acknowledged” off to see them.";
+      watchlistHint.style.display = "";
+      watchlistWrap.style.display = "none";
+    } else {
+      watchlistHint.style.display = "none";
+      watchlistWrap.style.display = "";
+    }
+  }
 }
 
 function setupTopbarSearchFilter() {

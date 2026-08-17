@@ -360,6 +360,8 @@
     }
     tbody tr { transition: background 0.1s ease; }
     tbody tr:hover { background: var(--surface-hover); }
+    tbody tr.row-acknowledged td { opacity: 0.55; }
+    tbody tr.row-acknowledged:hover td { opacity: 0.9; }
 
     th.sortable-col { cursor: pointer; user-select: none; }
     th.sortable-col:hover { color: var(--text); }

@@ -5,6 +5,17 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.7.0] - 2026-08-17
+
+- Added a "Hide acknowledged" toggle to the Watchlist, matching the dashboard's
+  toggle behavior. On by default, remembered across visits, and instant without
+  a page reload.
+- When acknowledged books are displayed on the Watchlist, they are visually
+  dimmed and feature a "Watch" action link to easily undo acknowledgment and
+  return them to your active watched list.
+- Updated the Watchlist header counter to display `(watched / total)`, e.g.
+  `(0 / 5)`, showing both your pending backlog and total released books.
+
 ## [1.6.0] - 2026-08-14
 
 - Added a "Hide acknowledged" toggle to the Recently released section —
