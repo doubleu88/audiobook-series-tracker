@@ -5,6 +5,12 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.10.0] - 2026-08-18
+
+- Linked CONTRIBUTING.md from the README so the new PR process is
+  discoverable, and this is also a live end-to-end test of the new
+  PR-template-driven changelog/release automation itself.
+
 ## [1.9.0] - 2026-08-18
 
 - Added a required PR template: every pull request must now check exactly
