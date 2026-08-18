@@ -22,3 +22,10 @@ tagging and publishing the GitHub Release automatically.
 If you're not sure which bump type applies, ask in the PR description —
 that's a completely normal thing to be unsure about, and easy to fix by
 editing the PR body (the check re-runs on every edit).
+
+## Release automation internals
+
+Every merge triggers `changelog-on-merge.yml`, which commits the new
+CHANGELOG.md entry and then explicitly dispatches `release.yml` (rather
+than relying on that push to trigger it, since GitHub doesn't chain
+workflow triggers off of `GITHUB_TOKEN`-authored pushes).
