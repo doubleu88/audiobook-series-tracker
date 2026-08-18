@@ -121,6 +121,10 @@ pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the PR process.
+
 ## Notes and limitations
 
 - This relies on scraping Audible's public pages rather than an official API
