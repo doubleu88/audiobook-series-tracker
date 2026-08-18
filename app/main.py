@@ -822,16 +822,10 @@ def download_book_grab(
     return RedirectResponse("/", status_code=303)
 
 
-def _watchlist_query(session, user: User, series_id: int | None = None):
-    """Released books in the user's non-muted subscriptions with no acknowledged
-    UserBookStatus row. A book with no row at all (e.g. one released long before
-    this feature existed) counts as unacknowledged — no backfill needed. Optionally
+def _watchlist_query(session, user: User, series_id: int | None = None, unacknowledged_only: bool = True):
+    """Released books in the user's non-muted subscriptions. If unacknowledged_only
+    is True, excludes books with an acknowledged UserBookStatus row. Optionally
     scoped to a single series, for the per-series view/bulk-acknowledge."""
-    acknowledged_book_ids = (
-        session.query(UserBookStatus.book_id)
-        .filter(UserBookStatus.user_id == user.id, UserBookStatus.acknowledged.is_(True))
-        .subquery()
-    )
     query = (
         session.query(Book, Series)
         .join(Series)
@@ -841,9 +835,15 @@ def _watchlist_query(session, user: User, series_id: int | None = None):
             Subscription.muted.is_(False),
             Book.release_date.isnot(None),
             Book.release_date <= datetime.date.today(),
-            Book.id.notin_(acknowledged_book_ids),
         )
     )
+    if unacknowledged_only:
+        acknowledged_book_ids = (
+            session.query(UserBookStatus.book_id)
+            .filter(UserBookStatus.user_id == user.id, UserBookStatus.acknowledged.is_(True))
+            .subquery()
+        )
+        query = query.filter(Book.id.notin_(acknowledged_book_ids))
     if series_id is not None:
         query = query.filter(Series.id == series_id)
     return query.order_by(Book.release_date.asc())
@@ -853,8 +853,22 @@ def _watchlist_query(session, user: User, series_id: int | None = None):
 def watchlist(request: Request, series_id: int | None = None, user: User = Depends(get_current_user)):
     session = get_session()
     try:
-        rows = _watchlist_query(session, user, series_id=series_id).all()
-        entries = [{"book": book, "series": series} for book, series in rows]
+        rows = _watchlist_query(session, user, series_id=series_id, unacknowledged_only=False).all()
+        acknowledged_book_ids = {
+            row.book_id
+            for row in session.query(UserBookStatus.book_id)
+            .filter(UserBookStatus.user_id == user.id, UserBookStatus.acknowledged.is_(True))
+            .all()
+        }
+        entries = [
+            {
+                "book": book,
+                "series": series,
+                "acknowledged": book.id in acknowledged_book_ids,
+            }
+            for book, series in rows
+        ]
+        unacknowledged_count = sum(1 for e in entries if not e["acknowledged"])
         filtered_series = None
         if series_id is not None:
             filtered_series = entries[0]["series"] if entries else (
@@ -869,6 +883,7 @@ def watchlist(request: Request, series_id: int | None = None, user: User = Depen
                 "request": request,
                 "user": user,
                 "entries": entries,
+                "unacknowledged_count": unacknowledged_count,
                 "filtered_series": filtered_series,
             },
         )
@@ -885,6 +900,13 @@ def _acknowledge_book(session, user: User, book: Book) -> None:
     status.acknowledged_at = datetime.datetime.utcnow()
 
 
+def _unacknowledge_book(session, user: User, book: Book) -> None:
+    status = session.query(UserBookStatus).filter_by(user_id=user.id, book_id=book.id).first()
+    if status is not None:
+        status.acknowledged = False
+        status.acknowledged_at = None
+
+
 @app.post("/books/{book_id}/acknowledge")
 def acknowledge_book(book_id: int, series_id: int | None = Form(None), user: User = Depends(get_current_user)):
     session = get_session()
@@ -898,6 +920,20 @@ def acknowledge_book(book_id: int, series_id: int | None = Form(None), user: Use
     # Acknowledging one book from a filtered series view should stay on that
     # series so the user can keep clicking through it, not bounce to the
     # full mixed watchlist.
+    redirect_url = f"/watchlist?series_id={series_id}" if series_id is not None else "/watchlist"
+    return RedirectResponse(redirect_url, status_code=303)
+
+
+@app.post("/books/{book_id}/unacknowledge")
+def unacknowledge_book(book_id: int, series_id: int | None = Form(None), user: User = Depends(get_current_user)):
+    session = get_session()
+    try:
+        book = _require_subscription_for_book(session, user, book_id)
+        if book is not None:
+            _unacknowledge_book(session, user, book)
+            session.commit()
+    finally:
+        session.close()
     redirect_url = f"/watchlist?series_id={series_id}" if series_id is not None else "/watchlist"
     return RedirectResponse(redirect_url, status_code=303)
 
