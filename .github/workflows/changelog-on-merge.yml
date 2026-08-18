@@ -16,7 +16,11 @@ name: Update CHANGELOG on merge
 # status gets rejected outright (GH006). The commit this workflow makes is
 # a deterministic derivative of a PR that already passed that check, so it
 # self-certifies: it records a passing "check" status against its own
-# commit SHA before pushing, rather than needing a real check run.
+# commit SHA before pushing, rather than needing a real check run. The
+# GitHub API refuses to attach a status to a commit it doesn't know about
+# yet, so the commit is pushed to a scratch branch first (to make GitHub
+# aware of the SHA), then the status is attached, then that same SHA is
+# fast-forwarded onto main and the scratch branch is deleted.
 
 "on":
   pull_request:
@@ -66,14 +70,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sha=$(git rev-parse HEAD)
+          scratch_ref="changelog-bot-tmp-${{ github.event.pull_request.number }}-${{ github.run_id }}"
+
+          git push origin "HEAD:refs/heads/$scratch_ref"
+
           gh api "repos/${{ github.repository }}/statuses/$sha" \
             -f state=success \
             -f context=check \
             -f description="Deterministic changelog commit for PR #${{ github.event.pull_request.number }}, which already passed this check" \
             --silent
 
-      - name: Push
-        run: git push origin main
+          git push origin main
+          git push origin --delete "$scratch_ref"
 
       - name: Trigger the release workflow
         env:
