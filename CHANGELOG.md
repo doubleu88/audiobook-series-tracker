@@ -5,6 +5,14 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.8.2] - 2026-08-18
+
+- Merges to main now automatically get tagged and released on GitHub — a
+  new workflow checks CHANGELOG.md's top entry after every push, and if
+  its version doesn't have a matching tag yet, creates the tag and a
+  GitHub Release using that entry as the notes. Replaces doing this by
+  hand after every merge.
+
 ## [1.8.1] - 2026-08-18
 
 - The dashboard's and Watchlist's "Hide acknowledged" toggles now remember
