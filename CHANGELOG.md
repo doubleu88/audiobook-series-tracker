@@ -5,6 +5,12 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.10.1] - 2026-08-18
+
+- Documented in CONTRIBUTING.md how changelog-on-merge.yml hands off to
+  release.yml via workflow_dispatch, and this PR is also a real end-to-end
+  test of the workflow_dispatch fix for that handoff.
+
 ## [1.10.0] - 2026-08-18
 
 - Linked CONTRIBUTING.md from the README so the new PR process is
