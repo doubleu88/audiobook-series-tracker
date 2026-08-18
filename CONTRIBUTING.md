@@ -29,3 +29,5 @@ Every merge triggers `changelog-on-merge.yml`, which commits the new
 CHANGELOG.md entry and then explicitly dispatches `release.yml` (rather
 than relying on that push to trigger it, since GitHub doesn't chain
 workflow triggers off of `GITHUB_TOKEN`-authored pushes).
+
+<!-- validates automation still works with branch protection enabled -->
