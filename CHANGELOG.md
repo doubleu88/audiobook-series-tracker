@@ -16,6 +16,28 @@ PATCH is a fix with no new capability.
 - Updated the Watchlist header counter to display `(watched / total)`, e.g.
   `(0 / 5)`, showing both your pending backlog and total released books.
 
+## [1.6.2] - 2026-08-18
+
+- Simplified the 1.6.1 fix: dropped the browser-cookie mechanism and just
+  trust the server's clock, now that its timezone is actually configured
+  correctly. The cookie approach only ever fixed the dashboard — push
+  notifications and the weekly digest have no browser to read a cookie
+  from, so they were still exposed to the same class of bug. A correctly
+  configured server clock fixes date classification everywhere at once,
+  with no added client-side complexity.
+
+## [1.6.1] - 2026-08-18
+
+- Fixed "recently released" showing books that hadn't actually released
+  yet from the user's point of view. Root cause was two-fold: the
+  container's clock was silently running on UTC despite being configured
+  for a specific timezone (fixed — the base image had no timezone data
+  installed at all, so the TZ setting was a no-op), and even with the
+  server's clock correct, a user in a different timezone than the server
+  would still see the wrong day. The dashboard's "recently released" vs
+  "releasing soon" split now uses the browser's own local date (sent via a
+  cookie set on page load) instead of the server's clock.
+
 ## [1.6.0] - 2026-08-14
 
 - Added a "Hide acknowledged" toggle to the Recently released section —
