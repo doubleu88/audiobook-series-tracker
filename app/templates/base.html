@@ -10,6 +10,26 @@
       } catch (e) {}
     })();
   </script>
+  <script>
+    (function () {
+      // The server can't know the visitor's real local date on its own (its
+      // own clock is a poor substitute — see _client_today in main.py for
+      // why). This sets a cookie from the browser's own clock so the server
+      // can use it for "recently released" vs "releasing soon" classification.
+      // Reloads once, only when the cookie is missing or stale (e.g. the tab
+      // was left open across midnight) — never on a normal same-day load.
+      try {
+        var now = new Date();
+        var todayStr = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0") + "-" + String(now.getDate()).padStart(2, "0");
+        var match = document.cookie.match(/(?:^|; )client_date=([^;]*)/);
+        var current = match ? decodeURIComponent(match[1]) : null;
+        if (current !== todayStr) {
+          document.cookie = "client_date=" + todayStr + "; path=/; max-age=" + (60 * 60 * 24 * 2) + "; samesite=lax";
+          if (current !== null) location.reload();
+        }
+      } catch (e) {}
+    })();
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Audiobook Series Tracker</title>
   <link rel="manifest" href="/manifest.json">

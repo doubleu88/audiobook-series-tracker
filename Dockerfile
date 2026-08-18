@@ -5,7 +5,13 @@ WORKDIR /app
 # curl is used directly (via subprocess) to talk to Audible — see app/scraper.py
 # for why: plain Python HTTP clients get blocked by Audible's WAF even with full
 # browser TLS fingerprint impersonation, but curl itself is unaffected.
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+#
+# tzdata is required for the TZ environment variable (set in docker-compose.yml)
+# to actually take effect — python:3.12-slim has no timezone data installed at
+# all, so datetime.date.today() silently runs on UTC regardless of TZ until
+# this is present. Confirmed this was happening in production: the container's
+# clock was hours ahead of the real local date.
+RUN apt-get update && apt-get install -y --no-install-recommends curl tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

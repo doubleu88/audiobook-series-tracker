@@ -5,6 +5,18 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.6.1] - 2026-08-18
+
+- Fixed "recently released" showing books that hadn't actually released
+  yet from the user's point of view. Root cause was two-fold: the
+  container's clock was silently running on UTC despite being configured
+  for a specific timezone (fixed — the base image had no timezone data
+  installed at all, so the TZ setting was a no-op), and even with the
+  server's clock correct, a user in a different timezone than the server
+  would still see the wrong day. The dashboard's "recently released" vs
+  "releasing soon" split now uses the browser's own local date (sent via a
+  cookie set on page load) instead of the server's clock.
+
 ## [1.6.0] - 2026-08-14
 
 - Added a "Hide acknowledged" toggle to the Recently released section —
