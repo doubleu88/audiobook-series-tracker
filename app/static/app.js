@@ -208,20 +208,24 @@ function setupSortableTables() {
   });
 }
 
-const HIDE_ACKNOWLEDGED_STORAGE_KEY = "abtracker-hide-acknowledged";
-
+// Dashboard and Watchlist each have their own "Hide acknowledged" checkbox,
+// with independent remembered preferences — toggling one shouldn't silently
+// change what the other page shows. Each template's checkbox carries its own
+// data-storage-key; the two pages never render at the same time, so a single
+// module-level hideAcknowledged variable is still fine at runtime.
 function setupAcknowledgedToggle() {
   const checkbox = document.getElementById("hide-acknowledged-toggle");
   if (!checkbox) return;
 
-  const stored = localStorage.getItem(HIDE_ACKNOWLEDGED_STORAGE_KEY);
+  const storageKey = checkbox.dataset.storageKey;
+  const stored = localStorage.getItem(storageKey);
   hideAcknowledged = stored === null ? true : stored === "true";
   checkbox.checked = hideAcknowledged;
   applyCombinedVisibility();
 
   checkbox.addEventListener("change", () => {
     hideAcknowledged = checkbox.checked;
-    localStorage.setItem(HIDE_ACKNOWLEDGED_STORAGE_KEY, hideAcknowledged ? "true" : "false");
+    localStorage.setItem(storageKey, hideAcknowledged ? "true" : "false");
     applyCombinedVisibility();
   });
 }

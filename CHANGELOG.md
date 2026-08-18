@@ -5,7 +5,13 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
-## [1.7.0] - 2026-08-17
+## [1.8.1] - 2026-08-18
+
+- The dashboard's and Watchlist's "Hide acknowledged" toggles now remember
+  their preferences independently — toggling one no longer silently changes
+  what the other page shows.
+
+## [1.8.0] - 2026-08-18
 
 - Added a "Hide acknowledged" toggle to the Watchlist, matching the dashboard's
   toggle behavior. On by default, remembered across visits, and instant without
@@ -15,6 +21,13 @@ PATCH is a fix with no new capability.
   return them to your active watched list.
 - Updated the Watchlist header counter to display `(watched / total)`, e.g.
   `(0 / 5)`, showing both your pending backlog and total released books.
+  Contributed by @wtanksleyjr (#4).
+
+## [1.7.0] - 2026-08-18
+
+- Added a "#watching" column to the "All series" table showing
+  (unacknowledged / total released) for each series, linking straight to
+  that series' filtered Watchlist. Contributed by @wtanksleyjr (#3).
 
 ## [1.6.2] - 2026-08-18
 
