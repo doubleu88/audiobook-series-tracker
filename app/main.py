@@ -414,26 +414,6 @@ def refresh_library_status(request: Request, user: User = Depends(get_current_us
     return RedirectResponse(request.headers.get("referer") or "/", status_code=303)
 
 
-def _client_today(request: Request) -> datetime.date:
-    """The server's own clock isn't a reliable stand-in for "today" from the
-    user's point of view — the container can be hours off from the user's
-    actual local date around midnight (confirmed: this server's clock was
-    running on UTC despite being configured for Central time, which alone
-    made "released today" wrong for hours around the boundary; even with
-    that fixed, a user in a different timezone than the server would still
-    see the wrong day). base.html sets a `client_date` cookie from the
-    browser's own clock on every page load, so it should always be present
-    for a real user by the time this runs. Falling back to the server's own
-    date only covers the very first request before that cookie exists."""
-    raw = request.cookies.get("client_date")
-    if raw:
-        try:
-            return datetime.date.fromisoformat(raw)
-        except ValueError:
-            pass
-    return datetime.date.today()
-
-
 @app.get("/", response_class=HTMLResponse)
 def dashboard(
     request: Request,
@@ -454,7 +434,7 @@ def dashboard(
             .all()
         )
         rows = []
-        today = _client_today(request)
+        today = datetime.date.today()
         recent_cutoff = shift_months(today, -recent_months)
         upcoming_cutoff = shift_months(today, upcoming_months)
 

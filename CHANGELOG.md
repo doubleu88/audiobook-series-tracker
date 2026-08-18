@@ -5,6 +5,16 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.6.2] - 2026-08-18
+
+- Simplified the 1.6.1 fix: dropped the browser-cookie mechanism and just
+  trust the server's clock, now that its timezone is actually configured
+  correctly. The cookie approach only ever fixed the dashboard — push
+  notifications and the weekly digest have no browser to read a cookie
+  from, so they were still exposed to the same class of bug. A correctly
+  configured server clock fixes date classification everywhere at once,
+  with no added client-side complexity.
+
 ## [1.6.1] - 2026-08-18
 
 - Fixed "recently released" showing books that hadn't actually released
