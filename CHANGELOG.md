@@ -5,6 +5,16 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.9.0] - 2026-08-18
+
+- Added a required PR template: every pull request must now check exactly
+  one version-bump type (Major/Minor/Patch) and fill in a changelog
+  description, enforced by a required status check that blocks merging
+  until both are present. On merge, that description and bump type are
+  used to automatically write the CHANGELOG.md entry (no more manually
+  editing it before merging), which in turn triggers the existing
+  auto-tag-and-release workflow. See CONTRIBUTING.md.
+
 ## [1.8.2] - 2026-08-18
 
 - Merges to main now automatically get tagged and released on GitHub — a
