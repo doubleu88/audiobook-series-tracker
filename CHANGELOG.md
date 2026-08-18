@@ -5,6 +5,12 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.10.2] - 2026-08-18
+
+- Final validation pass confirming the changelog/release automation's
+  direct-to-main pushes still succeed now that branch protection requires
+  the PR checklist status check.
+
 ## [1.10.1] - 2026-08-18
 
 - Documented in CONTRIBUTING.md how changelog-on-merge.yml hands off to
