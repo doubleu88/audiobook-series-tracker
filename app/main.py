@@ -453,12 +453,18 @@ def dashboard(
             latest_released = next(
                 (b for b in reversed(series.books) if b.released), None
             )
+            released_count = sum(1 for b in series.books if b.released)
+            watchlist_count = sum(
+                1 for b in series.books if b.released and b.id not in acknowledged_book_ids
+            )
             cover = next((b.cover_image for b in series.books if b.cover_image), None)
             rows.append(
                 {
                     "series": series,
                     "upcoming": upcoming,
                     "latest_released": latest_released,
+                    "released_count": released_count,
+                    "watchlist_count": watchlist_count,
                     "cover": cover,
                     "muted": muted,
                 }
