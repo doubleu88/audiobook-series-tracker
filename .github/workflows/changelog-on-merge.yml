@@ -3,9 +3,13 @@ name: Update CHANGELOG on merge
 # On every merged PR, reads the bump type + description from the PR body
 # (validated by pr-checklist.yml before merge was ever allowed) and inserts
 # the corresponding CHANGELOG.md entry, committed directly to main. That
-# commit is itself what triggers release.yml to tag and publish the release
-# — this workflow deliberately doesn't tag/release itself, to avoid having
-# two places that know how to do that.
+# commit is what release.yml should tag and publish — but since this
+# workflow pushes it using the default GITHUB_TOKEN, GitHub's loop
+# -prevention rule means the push itself won't trigger release.yml's
+# `push` trigger. So instead of relying on that, the last step here
+# explicitly dispatches release.yml (workflow_dispatch is exempt from that
+# same restriction). This workflow still deliberately doesn't tag/release
+# itself, to avoid having two places that know how to do that.
 
 "on":
   pull_request:
@@ -14,6 +18,7 @@ name: Update CHANGELOG on merge
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   update-changelog:
@@ -48,3 +53,8 @@ jobs:
           git add CHANGELOG.md
           git commit -m "Update CHANGELOG.md for #${{ github.event.pull_request.number }}"
           git push origin main
+
+      - name: Trigger the release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release.yml --ref main

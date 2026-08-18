@@ -5,10 +5,19 @@ name: Auto-release from CHANGELOG
 # to main and does nothing unless CHANGELOG.md's topmost "## [X.Y.Z] -
 # YYYY-MM-DD" entry doesn't have a matching tag yet — so it's safe to run
 # on every push, including ones that don't touch the changelog at all.
+#
+# Also listens for workflow_dispatch: changelog-on-merge.yml pushes its
+# CHANGELOG.md commit using the default GITHUB_TOKEN, and GitHub's loop
+# -prevention rule means a GITHUB_TOKEN push never triggers another
+# workflow's `push` trigger — so that commit alone would never reach this
+# workflow. workflow_dispatch is the documented exception to that rule, so
+# changelog-on-merge.yml explicitly dispatches this workflow as its last
+# step.
 
 "on":
   push:
     branches: [main]
+  workflow_dispatch: {}
 
 permissions:
   contents: write
