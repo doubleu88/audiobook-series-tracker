@@ -5,6 +5,15 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.11.1] - 2026-08-19
+
+- Fixed series lookups silently failing for a large share of series
+  (roughly half, in a live test of 106 real ones) because Audible has
+  rolled out a redesigned series page the scraper didn't recognize at
+  all — it's now parsed alongside the original layout. Also fixed a
+  single book with a malformed release date aborting the entire
+  add-series request instead of just leaving that book's date unknown.
+
 ## [1.11.0] - 2026-08-19
 
 - The profile menu now shows the app's current version, and flags when
