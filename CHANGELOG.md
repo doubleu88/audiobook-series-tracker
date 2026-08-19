@@ -5,6 +5,13 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.11.0] - 2026-08-19
+
+- The profile menu now shows the app's current version, and flags when
+  a newer release is available on GitHub (checked periodically,
+  cached), linking straight to it. Falls back to just showing the
+  current version if the check can't reach GitHub.
+
 ## [1.10.4] - 2026-08-18
 
 - Fixed the self-certified "check" status failing with a 422 because
