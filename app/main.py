@@ -28,6 +28,7 @@ from app.push import get_vapid_public_key_b64
 from app.scheduler import check_availability_for_user, refresh_series, start_scheduler
 from app.scraper import SeriesPageError, fetch_series, find_best_match, search_series
 from app.timeutil import humanize_relative, shift_months
+from app.version import CURRENT_VERSION, get_update_status
 
 app = FastAPI(title="Audiobook Series Tracker")
 ONE_YEAR_SECONDS = 60 * 60 * 24 * 365
@@ -37,6 +38,8 @@ app.add_middleware(
     max_age=ONE_YEAR_SECONDS,
 )
 templates = Jinja2Templates(directory="app/templates")
+templates.env.globals["app_version"] = CURRENT_VERSION
+templates.env.globals["update_status"] = get_update_status
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 

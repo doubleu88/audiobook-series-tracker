@@ -18,6 +18,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+# app/version.py reads its own version from this at runtime, rather than the
+# version being baked in separately and risking drifting out of sync.
+COPY CHANGELOG.md .
 
 VOLUME ["/app/data"]
 EXPOSE 8000
