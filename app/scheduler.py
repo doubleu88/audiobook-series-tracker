@@ -89,8 +89,12 @@ def refresh_series(series_id: int) -> None:
             try:
                 scraped = fetch_series(series.url)
                 break
-            except (SeriesPageError, Exception) as exc:  # noqa: BLE001 - retry, then log and move on
+            except SeriesPageError as exc:
                 last_exc = exc
+                logger.debug("Attempt %d/3 to refresh %s failed: %s", attempt + 1, series.name, exc)
+            except Exception as exc:  # noqa: BLE001 - retry, then log and move on
+                last_exc = exc
+                logger.exception("Unexpected error on attempt %d/3 refreshing %s", attempt + 1, series.name)
 
         if scraped is None:
             logger.warning("Failed to refresh series %s (%s): %s", series.name, series.asin, last_exc)
@@ -172,7 +176,10 @@ def refresh_all_series() -> None:
             # failing partway through with a generic "No books found" error
             # that has nothing to do with the actual page content.
             time.sleep(1.0)
-        refresh_series(series_id)
+        try:
+            refresh_series(series_id)
+        except Exception:  # noqa: BLE001 - one bad series shouldn't stop the rest of the batch
+            logger.exception("Unexpected error refreshing series id %s", series_id)
 
 
 def check_availability_for_user(user_id: int) -> None:
@@ -227,7 +234,10 @@ def check_availability_all_users() -> None:
         session.close()
 
     for user_id in user_ids:
-        check_availability_for_user(user_id)
+        try:
+            check_availability_for_user(user_id)
+        except Exception:  # noqa: BLE001 - one bad user shouldn't stop the rest of the batch
+            logger.exception("Unexpected error checking Audiobookshelf availability for user id %s", user_id)
 
 
 def send_weekly_digests() -> None:
@@ -238,37 +248,40 @@ def send_weekly_digests() -> None:
         week_ago_datetime = datetime.datetime.utcnow() - datetime.timedelta(days=7)
 
         for user in session.query(User).filter_by(digest_enabled=True).all():
-            series_list = (
-                session.query(Series)
-                .join(Subscription)
-                .filter(Subscription.user_id == user.id, Subscription.muted.is_(False))
-                .all()
-            )
+            try:
+                series_list = (
+                    session.query(Series)
+                    .join(Subscription)
+                    .filter(Subscription.user_id == user.id, Subscription.muted.is_(False))
+                    .all()
+                )
 
-            new_count = 0
-            released_count = 0
-            for series in series_list:
-                for book in series.books:
-                    if book.created_at and book.created_at >= week_ago_datetime:
-                        new_count += 1
-                    if book.release_date and week_ago_date <= book.release_date <= today:
-                        released_count += 1
+                new_count = 0
+                released_count = 0
+                for series in series_list:
+                    for book in series.books:
+                        if book.created_at and book.created_at >= week_ago_datetime:
+                            new_count += 1
+                        if book.release_date and week_ago_date <= book.release_date <= today:
+                            released_count += 1
 
-            if new_count == 0 and released_count == 0:
-                continue
+                if new_count == 0 and released_count == 0:
+                    continue
 
-            parts = []
-            if released_count:
-                parts.append(f"{released_count} book{'s' if released_count != 1 else ''} released")
-            if new_count:
-                parts.append(f"{new_count} new book{'s' if new_count != 1 else ''} added")
-            body = " · ".join(parts)
+                parts = []
+                if released_count:
+                    parts.append(f"{released_count} book{'s' if released_count != 1 else ''} released")
+                if new_count:
+                    parts.append(f"{new_count} new book{'s' if new_count != 1 else ''} added")
+                body = " · ".join(parts)
 
-            subscriptions = session.query(PushSubscription).filter_by(user_id=user.id).all()
-            for subscription in subscriptions:
-                alive = send_push(subscription, title="Your weekly digest", body=body, url="/")
-                if not alive:
-                    session.delete(subscription)
+                subscriptions = session.query(PushSubscription).filter_by(user_id=user.id).all()
+                for subscription in subscriptions:
+                    alive = send_push(subscription, title="Your weekly digest", body=body, url="/")
+                    if not alive:
+                        session.delete(subscription)
+            except Exception:  # noqa: BLE001 - one bad user shouldn't stop everyone else's digest
+                logger.exception("Unexpected error building weekly digest for user %s", user.username)
         session.commit()
     finally:
         session.close()
@@ -284,4 +297,5 @@ def start_scheduler() -> BackgroundScheduler:
         send_weekly_digests, CronTrigger(day_of_week="mon", hour=13, timezone="UTC"), id="weekly_digest"
     )
     scheduler.start()
+    logger.info("Background scheduler started (refresh every 24h, ABS check every 6h, digest Mondays)")
     return scheduler

@@ -1,3 +1,4 @@
+import logging
 import secrets
 from pathlib import Path
 
@@ -5,6 +6,8 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.models import Base
+
+logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
@@ -85,9 +88,15 @@ def _migrate(conn) -> None:
 
 
 def init_db() -> None:
+    logger.info("Initializing database at %s", DB_PATH)
     Base.metadata.create_all(engine)
-    with engine.begin() as conn:
-        _migrate(conn)
+    try:
+        with engine.begin() as conn:
+            _migrate(conn)
+    except Exception:
+        logger.exception("Database migration failed")
+        raise
+    logger.info("Database ready")
 
 
 def get_session() -> Session:
