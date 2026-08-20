@@ -5,6 +5,19 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.12.0] - 2026-08-20
+
+- Added timestamped, properly-configured logging across the whole app
+  (previously there was no logging setup at all, so most errors were
+  never actually visible in the logs). Every route and background job
+  now logs failures with enough context to diagnose them, background
+  jobs isolate per-item failures so one bad series/user can't silently
+  abort the rest of a batch, and a genuinely unexpected error is always
+  captured with a full traceback instead of possibly vanishing. Admins
+  can also flip on verbose debug logging at runtime from
+  `/admin/health`, no restart required, for tracking down issues that
+  need more detail than the normal logs show.
+
 ## [1.11.1] - 2026-08-19
 
 - Fixed series lookups silently failing for a large share of series
