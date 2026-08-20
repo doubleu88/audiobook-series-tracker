@@ -5,6 +5,12 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.13.3] - 2026-08-20
+
+- Test PR validating that the new code-owner-review branch protection
+  rule doesn't break the changelog/release automation's direct push to
+  main.
+
 ## [1.13.2] - 2026-08-20
 
 - Added a CODEOWNERS file (currently just @doubleu88) as groundwork for
