@@ -122,13 +122,16 @@ function setupThemeToggle() {
 // are covered by both). Two independent handlers each setting el.style.display
 // would fight each other — whichever ran last would win outright, ignoring
 // the other's condition. Instead, both conditions are combined here: an
-// element shows only if it passes the search AND isn't hidden-by-acknowledged.
+// element shows only if it passes the search (matching series name or book
+// title, if present) AND isn't hidden-by-acknowledged.
 let searchQuery = "";
 let hideAcknowledged = true;
 
 function applyCombinedVisibility() {
   document.querySelectorAll("[data-series-name]").forEach((el) => {
-    const searchOk = !searchQuery || el.dataset.seriesName.includes(searchQuery);
+    const seriesMatch = el.dataset.seriesName && el.dataset.seriesName.includes(searchQuery);
+    const bookMatch = el.dataset.bookTitle && el.dataset.bookTitle.includes(searchQuery);
+    const searchOk = !searchQuery || Boolean(seriesMatch || bookMatch);
     const ackOk = !(hideAcknowledged && el.dataset.acknowledged === "true");
     el.style.display = searchOk && ackOk ? "" : "none";
   });

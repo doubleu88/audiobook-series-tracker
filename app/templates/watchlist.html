@@ -33,7 +33,7 @@
   {% else %}
   <p class="meta-muted">Released books from your subscriptions you haven't dealt with yet — this list has no
     time limit, so nothing falls off it just because you haven't logged in for a while. Click a series name to
-    view (and acknowledge) just that series.</p>
+    view (and acknowledge) just that series. Search filters by series or book title.</p>
   {% endif %}
 
   {% if entries %}
@@ -50,7 +50,7 @@
     </thead>
     <tbody>
       {% for entry in entries %}
-      <tr data-series-name="{{ entry.series.name|lower }}" data-acknowledged="{{ 'true' if entry.acknowledged else 'false' }}"{% if entry.acknowledged %} class="row-acknowledged"{% endif %}>
+      <tr data-series-name="{{ entry.series.name|lower }}" data-book-title="{{ entry.book.title|lower }}" data-acknowledged="{{ 'true' if entry.acknowledged else 'false' }}"{% if entry.acknowledged %} class="row-acknowledged"{% endif %}>
         <td>
           {% if entry.book.cover_image %}
             <img class="cover-sm" src="{{ entry.book.cover_image }}" alt="">
