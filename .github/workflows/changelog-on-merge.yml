@@ -33,6 +33,14 @@ name: Update CHANGELOG on merge
 # only untrusted input used is the PR body text, passed through as a
 # plain env var (never interpolated into a shell script), so there's no
 # code-execution or injection surface for a malicious PR to exploit.
+#
+# main now also requires review from a code owner before merging (via a
+# repo ruleset, bypassable only by the Admin role — GitHub Actions itself
+# can't be added as a bypass actor on a personal-account repo, confirmed
+# via a real 422 trying). So this workflow authenticates with ADMIN_PAT
+# (a fine-grained PAT belonging to an actual Admin-role user, stored as a
+# repo secret) instead of the default token for the checkout/push, since
+# GITHUB_TOKEN-authored pushes have no way to bypass that rule at all.
 
 "on":
   pull_request_target:
@@ -54,6 +62,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+          token: ${{ secrets.ADMIN_PAT }}
 
       - name: Extract bump type and description from the PR body
         env:
