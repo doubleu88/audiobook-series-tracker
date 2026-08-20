@@ -3,13 +3,11 @@ name: Update CHANGELOG on merge
 # On every merged PR, reads the bump type + description from the PR body
 # (validated by pr-checklist.yml before merge was ever allowed) and inserts
 # the corresponding CHANGELOG.md entry, committed directly to main. That
-# commit is what release.yml should tag and publish — but since this
-# workflow pushes it using the default GITHUB_TOKEN, GitHub's loop
-# -prevention rule means the push itself won't trigger release.yml's
-# `push` trigger. So instead of relying on that, the last step here
-# explicitly dispatches release.yml (workflow_dispatch is exempt from that
-# same restriction). This workflow still deliberately doesn't tag/release
-# itself, to avoid having two places that know how to do that.
+# commit is what release.yml tags and publishes — it picks this up on its
+# own via its normal push trigger, since (see below) this workflow now
+# pushes with ADMIN_PAT rather than the default token. This workflow still
+# deliberately doesn't tag/release itself, to avoid having two places that
+# know how to do that.
 #
 # main requires the "check" status (from pr-checklist.yml) on every push,
 # not just on PR merges — a raw `git push` of a commit with no recorded
@@ -41,6 +39,13 @@ name: Update CHANGELOG on merge
 # (a fine-grained PAT belonging to an actual Admin-role user, stored as a
 # repo secret) instead of the default token for the checkout/push, since
 # GITHUB_TOKEN-authored pushes have no way to bypass that rule at all.
+# Side effect: a PAT push isn't subject to the GITHUB_TOKEN loop
+# -prevention rule mentioned above, so it now reaches release.yml's push
+# trigger on its own — this workflow used to also explicitly
+# workflow_dispatch release.yml to work around that rule, but doing both
+# raced the two runs against each other over the same tag (confirmed for
+# real: both fired the same second, one lost with "tag already exists").
+# Dropped the explicit dispatch; the push trigger alone is sufficient now.
 
 "on":
   pull_request_target:
@@ -49,7 +54,6 @@ name: Update CHANGELOG on merge
 
 permissions:
   contents: write
-  actions: write
   statuses: write
 
 jobs:
@@ -103,8 +107,3 @@ jobs:
 
           git push origin main
           git push origin --delete "$scratch_ref"
-
-      - name: Trigger the release workflow
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run release.yml --ref main

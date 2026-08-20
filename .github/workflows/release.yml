@@ -6,13 +6,19 @@ name: Auto-release from CHANGELOG
 # YYYY-MM-DD" entry doesn't have a matching tag yet — so it's safe to run
 # on every push, including ones that don't touch the changelog at all.
 #
-# Also listens for workflow_dispatch: changelog-on-merge.yml pushes its
-# CHANGELOG.md commit using the default GITHUB_TOKEN, and GitHub's loop
-# -prevention rule means a GITHUB_TOKEN push never triggers another
-# workflow's `push` trigger — so that commit alone would never reach this
-# workflow. workflow_dispatch is the documented exception to that rule, so
-# changelog-on-merge.yml explicitly dispatches this workflow as its last
-# step.
+# changelog-on-merge.yml's own push of the CHANGELOG.md commit (using
+# ADMIN_PAT, not the default token) triggers this via the push event
+# above like any other push — no separate dispatch needed. It used to
+# also explicitly workflow_dispatch this workflow, back when that push
+# was made with the default GITHUB_TOKEN and so was invisible to `push`
+# due to GitHub's loop-prevention rule; once it switched to ADMIN_PAT to
+# get past main's review requirement, that same rule stopped applying,
+# and the leftover dispatch call just raced this workflow's own
+# push-triggered run for the same tag (confirmed: both fired at the same
+# second, one lost). workflow_dispatch stays below only as a manual
+# "re-run the release step by hand" escape hatch — check_tag being
+# false-if-tag-already-exists (and the graceful exit below) keeps that
+# safe to trigger anytime, not because anything currently calls it.
 
 "on":
   push:
@@ -55,5 +61,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "$version" -m "$version"
-          git push origin "$version"
+
+          # check_tag above isn't atomic with this push — a concurrent run
+          # (e.g. another push landing on main a moment later) can create
+          # the same tag in between. That's a race, not an error: whichever
+          # run loses just has nothing left to do, so exit cleanly instead
+          # of failing the job.
+          if ! git push origin "$version"; then
+            echo "$version already exists on the remote (a concurrent run got there first) — nothing more to do."
+            exit 0
+          fi
+
           gh release create "$version" --title "$version" --notes-file release_notes.md
