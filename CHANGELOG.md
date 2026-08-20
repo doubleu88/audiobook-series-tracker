@@ -5,6 +5,16 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.13.4] - 2026-08-20
+
+- Fixed a race condition where two release.yml runs could fire for the
+  same commit and fight over creating the same tag, causing one to
+  fail with "tag already exists". Removed the now-redundant explicit
+  workflow_dispatch trigger (a leftover from before switching to
+  ADMIN_PAT, which no longer needs it), and made the tag push itself
+  exit gracefully instead of failing if it ever loses a similar race
+  in the future.
+
 ## [1.13.3] - 2026-08-20
 
 - Fixed the changelog automation's push to main being rejected (GH013)
