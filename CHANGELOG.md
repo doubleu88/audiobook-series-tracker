@@ -5,6 +5,75 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.11.1] - 2026-08-19
+
+- Fixed series lookups silently failing for a large share of series
+  (roughly half, in a live test of 106 real ones) because Audible has
+  rolled out a redesigned series page the scraper didn't recognize at
+  all — it's now parsed alongside the original layout. Also fixed a
+  single book with a malformed release date aborting the entire
+  add-series request instead of just leaving that book's date unknown.
+
+## [1.11.0] - 2026-08-19
+
+- The profile menu now shows the app's current version, and flags when
+  a newer release is available on GitHub (checked periodically,
+  cached), linking straight to it. Falls back to just showing the
+  current version if the check can't reach GitHub.
+
+## [1.10.4] - 2026-08-18
+
+- Fixed the self-certified "check" status failing with a 422 because
+  GitHub doesn't recognize a commit that hasn't been pushed anywhere
+  yet. The commit is now pushed to a scratch branch first so the
+  status can be attached to it, then fast-forwarded onto main. Also
+  reconciles the CHANGELOG.md entry PR #8's own failed run never wrote.
+
+## [1.10.3] - 2026-08-18
+
+- Fixed changelog-on-merge.yml's direct push to main being rejected
+  (GH006) now that main requires the "check" status on every push, not
+  just PR merges. The bot's commit now self-certifies a passing "check"
+  status for its own SHA before pushing, since it's a deterministic
+  derivative of a PR that already passed the real check. Also
+  reconciles the CHANGELOG.md entry PR #7's failed run never wrote.
+
+## [1.10.2] - 2026-08-18
+
+- Final validation pass confirming the changelog/release automation's
+  direct-to-main pushes still succeed now that branch protection requires
+  the PR checklist status check.
+
+## [1.10.1] - 2026-08-18
+
+- Documented in CONTRIBUTING.md how changelog-on-merge.yml hands off to
+  release.yml via workflow_dispatch, and this PR is also a real end-to-end
+  test of the workflow_dispatch fix for that handoff.
+
+## [1.10.0] - 2026-08-18
+
+- Linked CONTRIBUTING.md from the README so the new PR process is
+  discoverable, and this is also a live end-to-end test of the new
+  PR-template-driven changelog/release automation itself.
+
+## [1.9.0] - 2026-08-18
+
+- Added a required PR template: every pull request must now check exactly
+  one version-bump type (Major/Minor/Patch) and fill in a changelog
+  description, enforced by a required status check that blocks merging
+  until both are present. On merge, that description and bump type are
+  used to automatically write the CHANGELOG.md entry (no more manually
+  editing it before merging), which in turn triggers the existing
+  auto-tag-and-release workflow. See CONTRIBUTING.md.
+
+## [1.8.2] - 2026-08-18
+
+- Merges to main now automatically get tagged and released on GitHub — a
+  new workflow checks CHANGELOG.md's top entry after every push, and if
+  its version doesn't have a matching tag yet, creates the tag and a
+  GitHub Release using that entry as the notes. Replaces doing this by
+  hand after every merge.
+
 ## [1.8.1] - 2026-08-18
 
 - The dashboard's and Watchlist's "Hide acknowledged" toggles now remember

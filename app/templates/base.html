@@ -206,6 +206,22 @@
     }
     .menu-item:hover { background: var(--surface-hover); }
 
+    .menu-version {
+      display: block;
+      padding: 0.4rem 0.6rem 0.2rem;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      text-decoration: none !important;
+    }
+    .menu-version-update {
+      border-radius: var(--radius-sm);
+      background: var(--warning-bg);
+      color: var(--warning-text) !important;
+      padding: 0.5rem 0.6rem;
+      font-weight: 600;
+    }
+    .menu-version-update:hover { filter: brightness(1.08); }
+
     .theme-toggle { display: flex; gap: 0.35rem; padding: 0.1rem 0.4rem 0.6rem; }
     .theme-option {
       flex: 1;
@@ -552,6 +568,15 @@
           <form method="post" action="/logout">
             <button class="menu-item" type="submit">🚪 Log out</button>
           </form>
+          <div class="menu-divider"></div>
+          {% set update = update_status() %}
+          {% if update.update_available %}
+          <a class="menu-version menu-version-update" href="{{ update.release_url }}" target="_blank" rel="noopener">
+            🔔 v{{ app_version }} — update to v{{ update.latest }} available
+          </a>
+          {% else %}
+          <div class="menu-version">v{{ app_version }}{% if update.latest %} · up to date{% endif %}</div>
+          {% endif %}
         </div>
       </div>
     </div>

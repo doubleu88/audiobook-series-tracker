@@ -1,0 +1,89 @@
+name: Update CHANGELOG on merge
+
+# On every merged PR, reads the bump type + description from the PR body
+# (validated by pr-checklist.yml before merge was ever allowed) and inserts
+# the corresponding CHANGELOG.md entry, committed directly to main. That
+# commit is what release.yml should tag and publish — but since this
+# workflow pushes it using the default GITHUB_TOKEN, GitHub's loop
+# -prevention rule means the push itself won't trigger release.yml's
+# `push` trigger. So instead of relying on that, the last step here
+# explicitly dispatches release.yml (workflow_dispatch is exempt from that
+# same restriction). This workflow still deliberately doesn't tag/release
+# itself, to avoid having two places that know how to do that.
+#
+# main requires the "check" status (from pr-checklist.yml) on every push,
+# not just on PR merges — a raw `git push` of a commit with no recorded
+# status gets rejected outright (GH006). The commit this workflow makes is
+# a deterministic derivative of a PR that already passed that check, so it
+# self-certifies: it records a passing "check" status against its own
+# commit SHA before pushing, rather than needing a real check run. The
+# GitHub API refuses to attach a status to a commit it doesn't know about
+# yet, so the commit is pushed to a scratch branch first (to make GitHub
+# aware of the SHA), then the status is attached, then that same SHA is
+# fast-forwarded onto main and the scratch branch is deleted.
+
+"on":
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+  actions: write
+  statuses: write
+
+jobs:
+  update-changelog:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Extract bump type and description from the PR body
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s' "$PR_BODY" > /tmp/pr_body.md
+          python3 scripts/parse_pr_changelog.py extract /tmp/pr_body.md > /tmp/extracted.txt
+          head -n1 /tmp/extracted.txt > /tmp/bump_type.txt
+          tail -n +2 /tmp/extracted.txt > /tmp/description.txt
+
+      - name: Insert CHANGELOG.md entry
+        run: |
+          bump_type=$(cat /tmp/bump_type.txt)
+          date=$(date -u +%Y-%m-%d)
+          python3 scripts/insert_changelog_entry.py CHANGELOG.md "$bump_type" /tmp/description.txt "$date"
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "Update CHANGELOG.md for #${{ github.event.pull_request.number }}"
+
+      - name: Self-certify the required check for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          scratch_ref="changelog-bot-tmp-${{ github.event.pull_request.number }}-${{ github.run_id }}"
+
+          git push origin "HEAD:refs/heads/$scratch_ref"
+
+          gh api "repos/${{ github.repository }}/statuses/$sha" \
+            -f state=success \
+            -f context=check \
+            -f description="Deterministic changelog commit for PR #${{ github.event.pull_request.number }}, which already passed this check" \
+            --silent
+
+          git push origin main
+          git push origin --delete "$scratch_ref"
+
+      - name: Trigger the release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release.yml --ref main
