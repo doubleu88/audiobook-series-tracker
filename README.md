@@ -121,6 +121,24 @@ pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
+### Logging
+
+Logs (`docker compose logs -f`) are INFO level by default — set `LOG_LEVEL`
+in `docker-compose.yml` to `DEBUG`, `WARNING`, `ERROR`, or `CRITICAL` to
+change that permanently:
+
+```yaml
+services:
+  audiobook-tracker:
+    environment:
+      - LOG_LEVEL=DEBUG
+```
+
+For a one-off debugging session without editing config or restarting the
+container, an admin can flip debug logging on/off at runtime from
+`/admin/health` instead — it reverts to the `LOG_LEVEL`-configured default
+on the next restart.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the PR process.

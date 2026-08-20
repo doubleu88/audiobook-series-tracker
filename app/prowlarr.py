@@ -1,6 +1,9 @@
+import logging
 from dataclasses import dataclass
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 TIMEOUT = 20.0
 AUDIOBOOK_CATEGORY = 3030  # Newznab/Torznab "Audio/Audiobook" — confirmed against a
@@ -39,11 +42,16 @@ class ProwlarrClient:
                 **kwargs,
             )
         except httpx.RequestError as exc:
+            logger.debug("Prowlarr request to %s %s%s failed: %r", method, self.base_url, path, exc)
             raise ProwlarrError(f"Could not reach Prowlarr at {self.base_url}: {exc}") from exc
 
         if response.status_code == 401:
             raise ProwlarrError("Prowlarr rejected the API key (401 Unauthorized).")
         if response.status_code >= 400:
+            logger.debug(
+                "Prowlarr %s %s -> HTTP %s: %s",
+                method, path, response.status_code, response.text[:500],
+            )
             raise ProwlarrError(f"Prowlarr returned HTTP {response.status_code} for {path}.")
 
         try:
