@@ -5,6 +5,12 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.13.2] - 2026-08-20
+
+- Added a CODEOWNERS file (currently just @doubleu88) as groundwork for
+  requiring code-owner review on main. No enforcement yet — this just
+  defines who counts as a code owner before that rule gets turned on.
+
 ## [1.13.1] - 2026-08-20
 
 - Fixed the changelog-on-merge automation failing with a 403 on PRs
