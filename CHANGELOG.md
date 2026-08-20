@@ -5,6 +5,16 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.13.1] - 2026-08-20
+
+- Fixed the changelog-on-merge automation failing with a 403 on PRs
+  from external contributors' forks (GitHub forces GITHUB_TOKEN to
+  read-only for pull_request-triggered workflows on fork PRs, no
+  matter what permissions are declared) by switching to
+  pull_request_target, which is safe here since no fork code is ever
+  checked out or executed. Also reconciles the CHANGELOG.md entry PR
+  #12's failed run never wrote.
+
 ## [1.13.0] - 2026-08-20
 
 Augment existing search feature for the Watchlist page to also search by
