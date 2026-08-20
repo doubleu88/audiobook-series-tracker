@@ -7,3 +7,5 @@ services:
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+    # environment:
+    #   - LOG_LEVEL=DEBUG  # DEBUG/INFO/WARNING/ERROR/CRITICAL, default INFO

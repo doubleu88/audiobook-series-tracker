@@ -1,6 +1,7 @@
 import csv
 import datetime
 import io
+import logging
 import secrets
 import time
 
@@ -22,6 +23,7 @@ from app.auth import (
     verify_password,
 )
 from app.db import get_session, init_db
+from app.logging_config import configure_logging, is_debug_enabled, set_debug_logging
 from app.models import Book, PushSubscription, Series, Subscription, User, UserBookStatus
 from app.prowlarr import ProwlarrClient, ProwlarrError
 from app.push import get_vapid_public_key_b64
@@ -29,6 +31,9 @@ from app.scheduler import check_availability_for_user, refresh_series, start_sch
 from app.scraper import SeriesPageError, fetch_series, find_best_match, search_series
 from app.timeutil import humanize_relative, shift_months
 from app.version import CURRENT_VERSION, get_update_status
+
+configure_logging()
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Audiobook Series Tracker")
 ONE_YEAR_SECONDS = 60 * 60 * 24 * 365
@@ -41,6 +46,22 @@ templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["app_version"] = CURRENT_VERSION
 templates.env.globals["update_status"] = get_update_status
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+
+@app.exception_handler(Exception)
+def _log_unhandled_exception(request: Request, exc: Exception):
+    # Belt-and-braces: every route below also logs the specific errors it
+    # knows how to expect, but this guarantees that even a genuinely
+    # unanticipated exception is logged with a full traceback before the
+    # user sees a generic error, rather than only ever showing up as
+    # whatever uvicorn's own default handler prints.
+    logger.error("Unhandled exception on %s %s", request.method, request.url.path, exc_info=exc)
+    return HTMLResponse(
+        "<h1>Something went wrong</h1><p>This has been logged. Check the server logs "
+        "(<code>docker compose logs</code>) for details, or enable debug logging from "
+        "the admin health page for more information next time.</p>",
+        status_code=500,
+    )
 
 
 @app.get("/manifest.json")
@@ -80,6 +101,7 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
     try:
         user = session.query(User).filter_by(username=username).first()
         if user is None or not verify_password(password, user.password_hash):
+            logger.info("Failed login attempt for username %r", username)
             return templates.TemplateResponse(
                 "login.html", {"request": request, "error": "Incorrect username or password."}
             )
@@ -294,6 +316,7 @@ def _integrations_context(request: Request, user: User, session, abs_error: str 
             abs_libraries = ABSClient(db_user.abs_base_url, db_user.abs_api_key).list_libraries()
         except ABSError as exc:
             abs_error = str(exc)
+            logger.warning("Audiobookshelf check failed for user %s: %s", db_user.username, exc)
 
     prowlarr_ok = None
     if db_user.prowlarr_base_url and db_user.prowlarr_api_key and prowlarr_error is None:
@@ -302,6 +325,7 @@ def _integrations_context(request: Request, user: User, session, abs_error: str 
             prowlarr_ok = True
         except ProwlarrError as exc:
             prowlarr_error = str(exc)
+            logger.warning("Prowlarr check failed for user %s: %s", db_user.username, exc)
 
     return {
         "request": request,
@@ -545,6 +569,7 @@ def search_form(request: Request, q: str | None = None, user: User = Depends(get
                 results = search_series(q)
             except Exception as exc:  # noqa: BLE001 - surface any lookup failure to the page
                 error = f"Search failed: {exc}"
+                logger.exception("Search failed for query %r", q)
 
         subscribed_asins = {
             asin
@@ -606,6 +631,7 @@ def add_series(
         try:
             series_id = _subscribe_to_url(session, user, url)
         except SeriesPageError as exc:
+            logger.warning("Failed to add series from %r for user %s: %s", url, user.username, exc)
             return templates.TemplateResponse(
                 "add_series.html", {"request": request, "user": user, "error": str(exc)}
             )
@@ -648,6 +674,7 @@ def import_preview(request: Request, lines: str = Form(...), user: User = Depend
             candidates = search_series(line)
         except Exception as exc:  # noqa: BLE001 - surface per-line failures, don't abort the whole batch
             results.append({"query": line, "match": None, "candidates": [], "error": str(exc)})
+            logger.warning("Import search failed for line %r: %s", line, exc)
             continue
 
         best = find_best_match(line, candidates)
@@ -678,7 +705,8 @@ def import_confirm(
         for url in urls:
             try:
                 series_ids.append(_subscribe_to_url(session, user, url))
-            except SeriesPageError:
+            except SeriesPageError as exc:
+                logger.warning("Import confirm: failed to add %r for user %s: %s", url, user.username, exc)
                 continue
     finally:
         session.close()
@@ -782,6 +810,7 @@ def download_book_form(request: Request, book_id: int, user: User = Depends(get_
             results = ProwlarrClient(db_user.prowlarr_base_url, db_user.prowlarr_api_key).search(book.title)
         except ProwlarrError as exc:
             error = str(exc)
+            logger.warning("Prowlarr search failed for user %s, book %r: %s", user.username, book.title, exc)
 
         return templates.TemplateResponse(
             "book_download.html",
@@ -819,6 +848,7 @@ def download_book_grab(
             status.last_error = None
         except ProwlarrError as exc:
             status.last_error = str(exc)[:500]
+            logger.warning("Prowlarr grab failed for user %s, book id %s: %s", user.username, book_id, exc)
         session.commit()
     finally:
         session.close()
@@ -969,10 +999,24 @@ def admin_health(request: Request, admin: User = Depends(require_admin)):
         never_checked = session.query(Series).filter(Series.last_checked.is_(None)).all()
         return templates.TemplateResponse(
             "admin_health.html",
-            {"request": request, "user": admin, "unhealthy": unhealthy, "never_checked": never_checked},
+            {
+                "request": request,
+                "user": admin,
+                "unhealthy": unhealthy,
+                "never_checked": never_checked,
+                "debug_logging_enabled": is_debug_enabled(),
+            },
         )
     finally:
         session.close()
+
+
+@app.post("/admin/debug-logging/toggle")
+def admin_toggle_debug_logging(admin: User = Depends(require_admin)):
+    enabled = not is_debug_enabled()
+    set_debug_logging(enabled)
+    logger.info("Debug logging %s by admin %s", "enabled" if enabled else "disabled", admin.username)
+    return RedirectResponse("/admin/health", status_code=303)
 
 
 @app.get("/admin/users", response_class=HTMLResponse)

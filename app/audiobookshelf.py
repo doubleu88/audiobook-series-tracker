@@ -1,6 +1,9 @@
+import logging
 from dataclasses import dataclass
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 TIMEOUT = 15.0
 PAGE_SIZE = 500
@@ -30,11 +33,16 @@ class ABSClient:
                 timeout=TIMEOUT,
             )
         except httpx.RequestError as exc:
+            logger.debug("Audiobookshelf request to %s%s failed: %r", self.base_url, path, exc)
             raise ABSError(f"Could not reach Audiobookshelf at {self.base_url}: {exc}") from exc
 
         if response.status_code == 401:
             raise ABSError("Audiobookshelf rejected the API key (401 Unauthorized).")
         if response.status_code >= 400:
+            logger.debug(
+                "Audiobookshelf GET %s -> HTTP %s: %s",
+                path, response.status_code, response.text[:500],
+            )
             raise ABSError(f"Audiobookshelf returned HTTP {response.status_code} for {path}.")
 
         try:

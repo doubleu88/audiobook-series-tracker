@@ -66,6 +66,7 @@ def send_push(
     except WebPushException as exc:
         status = exc.response.status_code if exc.response is not None else None
         if status in (404, 410):
+            logger.debug("Push subscription %s is dead (HTTP %s), removing it", subscription.endpoint, status)
             return False
         logger.warning("Push to %s failed: %s", subscription.endpoint, exc)
         return True
