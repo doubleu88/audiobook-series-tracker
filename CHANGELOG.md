@@ -5,6 +5,14 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.13.0] - 2026-08-20
+
+Augment existing search feature for the Watchlist page to also search by
+book titles as well as series. This leaves the Dashboard search function
+unchanged (and so looking only for series names), on the grounds that the
+Dashboard reliably displays all of the series, while the Watchlist
+reliably displays everything. Contributed by @wtanksleyjr (#12).
+
 ## [1.12.0] - 2026-08-20
 
 - Added timestamped, properly-configured logging across the whole app
