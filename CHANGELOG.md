@@ -5,6 +5,14 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.13.3] - 2026-08-20
+
+- Fixed the changelog automation's push to main being rejected (GH013)
+  now that main requires code-owner review before merging. The
+  workflow now authenticates with a fine-grained admin PAT (stored as
+  a repo secret) instead of the default token, since GitHub Actions
+  itself can't be granted a bypass on a personal-account repo.
+
 ## [1.13.2] - 2026-08-20
 
 - Added a CODEOWNERS file (currently just @doubleu88) as groundwork for
