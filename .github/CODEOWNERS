@@ -1,0 +1,6 @@
+# Reviews from these owners satisfy the "require review from code owners"
+# branch protection rule on main. Add appointees here as trusted
+# reviewers/mergers — they'll also need to be added to main's branch
+# protection bypass/push-access lists separately (that part isn't
+# controlled by this file).
+* @doubleu88
