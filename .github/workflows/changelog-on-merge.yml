@@ -21,9 +21,21 @@ name: Update CHANGELOG on merge
 # yet, so the commit is pushed to a scratch branch first (to make GitHub
 # aware of the SHA), then the status is attached, then that same SHA is
 # fast-forwarded onto main and the scratch branch is deleted.
+#
+# Deliberately pull_request_target, not pull_request: for a PR opened from
+# a fork (i.e. any external contributor, not just maintainer-pushed test
+# branches), GitHub forces GITHUB_TOKEN to read-only under `pull_request`
+# regardless of the permissions block above — confirmed for real, this
+# broke the push+dispatch outright (403) on the first genuine fork PR to
+# go through this workflow. pull_request_target gets the real token. This
+# is safe here specifically because nothing from the fork is ever checked
+# out or executed: the checkout below is pinned to `ref: main`, and the
+# only untrusted input used is the PR body text, passed through as a
+# plain env var (never interpolated into a shell script), so there's no
+# code-execution or injection surface for a malicious PR to exploit.
 
 "on":
-  pull_request:
+  pull_request_target:
     types: [closed]
     branches: [main]
 
