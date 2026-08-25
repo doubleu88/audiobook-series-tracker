@@ -5,6 +5,10 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.13.5] - 2026-08-25
+
+- Series refresh now runs every 8 hours (12am, 8am, and 4pm Central) at fixed times, instead of once daily on a rolling 24h interval that drifted based on when the scheduler last started.
+
 ## [1.13.4] - 2026-08-20
 
 - Fixed a race condition where two release.yml runs could fire for the
