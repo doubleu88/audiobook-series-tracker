@@ -291,7 +291,7 @@ def start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="UTC")
     scheduler.add_job(
         refresh_all_series,
-        CronTrigger(hour="2,10,18", minute=0, timezone="America/Chicago"),
+        CronTrigger(hour="0,8,16", minute=0, timezone="America/Chicago"),
         id="refresh_all_series",
     )
     scheduler.add_job(
@@ -301,5 +301,5 @@ def start_scheduler() -> BackgroundScheduler:
         send_weekly_digests, CronTrigger(day_of_week="mon", hour=13, timezone="UTC"), id="weekly_digest"
     )
     scheduler.start()
-    logger.info("Background scheduler started (refresh every 8h at 2am/10am/6pm Central, ABS check every 6h, digest Mondays)")
+    logger.info("Background scheduler started (refresh every 8h at 12am/8am/4pm Central, ABS check every 6h, digest Mondays)")
     return scheduler
