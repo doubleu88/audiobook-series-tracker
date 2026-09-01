@@ -273,6 +273,7 @@ def calendar_feed(token: str):
                     continue
                 event = Event()
                 event.add("summary", f"{series.name}: {book.title}")
+                event.add("dtstamp", datetime.datetime.now(datetime.timezone.utc))
                 event.add("dtstart", book.release_date)
                 event.add("dtend", book.release_date + datetime.timedelta(days=1))
                 event.add("uid", f"book-{book.id}@audiobook-tracker")
