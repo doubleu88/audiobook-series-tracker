@@ -5,6 +5,15 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.13.6] - 2026-09-01
+
+- Refresh series 3x/day (12am/8am/4pm Central) instead of once daily.
+- Fix the calendar (.ics) feed so events actually show up when subscribed in Google Calendar — every event was missing a required field that made Google silently drop the whole feed's events on import.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+https://claude.ai/code/session_013HzRyaHXK4qrHGrTd652TR
+
 ## [1.13.5] - 2026-08-25
 
 - Series refresh now runs every 8 hours (12am, 8am, and 4pm Central) at fixed times, instead of once daily on a rolling 24h interval that drifted based on when the scheduler last started.
