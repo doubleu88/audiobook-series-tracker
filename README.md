@@ -155,6 +155,17 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the PR process.
   family/roommates without open signup, but it also means there's no
   self-service password reset — an admin has to delete and recreate an
   account if someone forgets their password.
+- **Google/Apple Calendar subscriptions to the `.ics` feed can take a long
+  time to show events, even right after subscribing.** Both apps poll
+  subscribed-by-URL calendars on their own internal schedule — often
+  12–48 hours — rather than fetching immediately when you add one, and
+  removing/re-adding the same URL doesn't reliably force an early refetch.
+  If you want to confirm the feed itself is fine (or just want events to
+  show up right away), use a one-time **Import** instead of (or in addition
+  to) the live subscription — in Google Calendar: Settings → Import & export
+  → Import, pointing at the downloaded `.ics` file. That parses and loads
+  the events immediately, independent of the subscription's polling
+  schedule.
 - Push notifications use the standard Web Push API (VAPID), the same
   mechanism as any other PWA — no third-party push service or account is
   involved. Each includes the relevant book's cover art as the notification
