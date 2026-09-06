@@ -5,6 +5,14 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.13.7] - 2026-09-06
+
+- README: note that Google/Apple Calendar can take 12-48h to show events after subscribing to the `.ics` feed (they poll on their own schedule, not on demand), and document the one-time Import workaround to load events immediately.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+https://claude.ai/code/session_013HzRyaHXK4qrHGrTd652TR
+
 ## [1.13.6] - 2026-09-01
 
 - Refresh series 3x/day (12am/8am/4pm Central) instead of once daily.
