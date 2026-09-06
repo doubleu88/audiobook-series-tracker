@@ -9,15 +9,28 @@
       {% else %}
         Watchlist
       {% endif %}
-      <span class="meta-muted">({{ unacknowledged_count }} / {{ entries|length }})</span>
+      <span class="meta-muted" id="watchlist-header-count">({{ unacknowledged_count }} / {{ entries|length }})</span>
     </h2>
-    <div style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">
+    <div id="watchlist-header-controls" style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">
+      {% if abs_connected and entries %}
+      <div class="chip-island" id="state-chip-island" role="group" aria-label="Filter by library status">
+        <button type="button" class="filter-chip active" data-filter="all">
+          All <span class="chip-count" id="chip-count-all"></span>
+        </button>
+        <button type="button" class="filter-chip" data-filter="in_library">
+          In library <span class="chip-count" id="chip-count-in-library"></span>
+        </button>
+        <button type="button" class="filter-chip" data-filter="not_in_library">
+          Not in library <span class="chip-count" id="chip-count-not-in-library"></span>
+        </button>
+      </div>
+      {% endif %}
       <label class="meta-muted" style="display:flex; align-items:center; gap:0.35rem; font-size:0.8rem; cursor:pointer;">
         <input type="checkbox" id="hide-acknowledged-toggle" data-storage-key="abtracker-hide-acknowledged-watchlist" checked>
         Hide acknowledged
       </label>
       {% if unacknowledged_count > 0 %}
-      <form method="post" action="/watchlist/acknowledge-all"
+      <form method="post" id="acknowledge-all-form" action="/watchlist/acknowledge-all"
             onsubmit="return confirm('Acknowledge all {{ unacknowledged_count }} book{{ "s" if unacknowledged_count != 1 else "" }}{{ " in " + filtered_series.name if filtered_series else "" }}?');">
         {% if filtered_series %}<input type="hidden" name="series_id" value="{{ filtered_series.id }}">{% endif %}
         <button class="btn" type="submit">
@@ -37,20 +50,33 @@
   {% endif %}
 
   {% if entries %}
-  <div class="series-table-wrap" id="watchlist-table-wrap" style="margin-top: 1rem;">
-  <table class="sortable">
+  {% if abs_connected %}
+  <div class="action-chips-wrap" style="margin-top: 1.25rem; display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
+    <span class="meta-muted" style="font-size: 0.82rem;">Compare library to acknowledged books:</span>
+    <div class="chip-island" id="action-chip-island" role="group" aria-label="Compare library to acknowledged books">
+      <button type="button" class="filter-chip" data-filter="in_library_unacknowledged" title="{% if filtered_series %}Books in this series in your library that you haven't acknowledged yet{% else %}Books in your library that you haven't acknowledged yet{% endif %}">
+        In library &amp; unacknowledged <span class="chip-count" id="chip-count-in-lib-unack"></span>
+      </button>
+      <button type="button" class="filter-chip" data-filter="not_in_library_acknowledged" title="{% if filtered_series %}Books in this series marked as acknowledged that are not in your library{% else %}Books marked as acknowledged that are not in your library{% endif %}">
+        Not in library &amp; acknowledged <span class="chip-count" id="chip-count-missing-ack"></span>
+      </button>
+    </div>
+  </div>
+  {% endif %}
+  <div class="series-table-wrap" id="watchlist-table-wrap" {% if filtered_series %}data-filtered-series="{{ filtered_series.name }}"{% endif %} style="margin-top: 1rem;">
+  <table class="sortable" id="watchlist-table">
     <thead>
       <tr>
-        <th></th>
+        <th style="width: 48px;"></th>
         <th data-sort-index="1">Book</th>
         <th data-sort-index="2">Series</th>
-        <th data-sort-index="3">Released</th>
-        <th></th>
+        <th data-sort-index="3" class="cell-nowrap" style="width: 110px;">Released</th>
+        <th class="cell-nowrap" style="width: 90px;"></th>
       </tr>
     </thead>
     <tbody>
       {% for entry in entries %}
-      <tr data-series-name="{{ entry.series.name|lower }}" data-book-title="{{ entry.book.title|lower }}" data-acknowledged="{{ 'true' if entry.acknowledged else 'false' }}"{% if entry.acknowledged %} class="row-acknowledged"{% endif %}>
+      <tr data-series-name="{{ entry.series.name|lower }}" data-book-title="{{ entry.book.title|lower }}" data-acknowledged="{{ 'true' if entry.acknowledged else 'false' }}" data-in-library="{{ 'true' if entry.in_library else 'false' }}"{% if entry.acknowledged %} class="row-acknowledged"{% endif %}>
         <td>
           {% if entry.book.cover_image %}
             <img class="cover-sm" src="{{ entry.book.cover_image }}" alt="">
@@ -60,6 +86,13 @@
         </td>
         <td>
           <a href="{{ entry.book.url }}" target="_blank" rel="noopener">{{ entry.book.title }}</a>
+          {% if abs_connected %}
+            {% if entry.in_library %}
+              <span class="badge badge-library" style="margin-left: 0.35rem; vertical-align: middle;">✅ In library</span>
+            {% else %}
+              <span class="badge badge-unknown" style="margin-left: 0.35rem; vertical-align: middle;">Not in library</span>
+            {% endif %}
+          {% endif %}
         </td>
         <td class="meta-muted">
           {% if filtered_series %}
@@ -68,8 +101,8 @@
             <a href="/watchlist?series_id={{ entry.series.id }}">{{ entry.series.name }}</a>
           {% endif %}
         </td>
-        <td class="meta-muted">{{ entry.book.release_date }}</td>
-        <td>
+        <td class="meta-muted cell-nowrap">{{ entry.book.release_date }}</td>
+        <td class="cell-nowrap">
           {% if entry.acknowledged %}
           <form class="inline" method="post" action="/books/{{ entry.book.id }}/unacknowledge">
             {% if filtered_series %}<input type="hidden" name="series_id" value="{{ filtered_series.id }}">{% endif %}
@@ -87,7 +120,7 @@
     </tbody>
   </table>
   </div>
-  <p class="empty-hint" id="watchlist-all-hidden-hint" style="display:none; margin-top: 1rem;"></p>
+  <p class="empty-hint" id="watchlist-all-hidden-hint" {% if filtered_series %}data-filtered-series="{{ filtered_series.name }}"{% endif %} style="display:none; margin-top: 1rem;"></p>
   {% else %}
   <p class="empty-hint">
     {% if filtered_series %}You're all caught up on {{ filtered_series.name }}.{% else %}You're all caught up.{% endif %}

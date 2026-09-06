@@ -6,7 +6,7 @@ import secrets
 import time
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from icalendar import Calendar, Event
@@ -880,7 +880,7 @@ def _watchlist_query(session, user: User, series_id: int | None = None, unacknow
         query = query.filter(Book.id.notin_(acknowledged_book_ids))
     if series_id is not None:
         query = query.filter(Series.id == series_id)
-    return query.order_by(Book.release_date.asc())
+    return query.order_by(Book.release_date.asc(), Series.name.asc(), Book.position.asc(), Book.id.asc())
 
 
 @app.get("/watchlist", response_class=HTMLResponse)
@@ -888,21 +888,27 @@ def watchlist(request: Request, series_id: int | None = None, user: User = Depen
     session = get_session()
     try:
         rows = _watchlist_query(session, user, series_id=series_id, unacknowledged_only=False).all()
-        acknowledged_book_ids = {
-            row.book_id
-            for row in session.query(UserBookStatus.book_id)
-            .filter(UserBookStatus.user_id == user.id, UserBookStatus.acknowledged.is_(True))
+        book_ids = [book.id for book, _ in rows]
+        statuses = {
+            s.book_id: s
+            for s in session.query(UserBookStatus)
+            .filter(
+                UserBookStatus.user_id == user.id,
+                UserBookStatus.book_id.in_(book_ids),
+            )
             .all()
-        }
+        } if book_ids else {}
         entries = [
             {
                 "book": book,
                 "series": series,
-                "acknowledged": book.id in acknowledged_book_ids,
+                "acknowledged": bool(statuses.get(book.id) and statuses[book.id].acknowledged),
+                "in_library": bool(statuses.get(book.id) and statuses[book.id].in_library),
             }
             for book, series in rows
         ]
         unacknowledged_count = sum(1 for e in entries if not e["acknowledged"])
+        abs_connected = bool(user.abs_base_url and user.abs_library_id)
         filtered_series = None
         if series_id is not None:
             filtered_series = entries[0]["series"] if entries else (
@@ -919,6 +925,7 @@ def watchlist(request: Request, series_id: int | None = None, user: User = Depen
                 "entries": entries,
                 "unacknowledged_count": unacknowledged_count,
                 "filtered_series": filtered_series,
+                "abs_connected": abs_connected,
             },
         )
     finally:
@@ -942,7 +949,12 @@ def _unacknowledge_book(session, user: User, book: Book) -> None:
 
 
 @app.post("/books/{book_id}/acknowledge")
-def acknowledge_book(book_id: int, series_id: int | None = Form(None), user: User = Depends(get_current_user)):
+def acknowledge_book(
+    request: Request,
+    book_id: int,
+    series_id: int | None = Form(None),
+    user: User = Depends(get_current_user),
+):
     session = get_session()
     try:
         book = _require_subscription_for_book(session, user, book_id)
@@ -951,6 +963,8 @@ def acknowledge_book(book_id: int, series_id: int | None = Form(None), user: Use
             session.commit()
     finally:
         session.close()
+    if request.headers.get("accept") == "application/json":
+        return JSONResponse({"ok": True, "book_id": book_id, "acknowledged": True})
     # Acknowledging one book from a filtered series view should stay on that
     # series so the user can keep clicking through it, not bounce to the
     # full mixed watchlist.
@@ -959,7 +973,12 @@ def acknowledge_book(book_id: int, series_id: int | None = Form(None), user: Use
 
 
 @app.post("/books/{book_id}/unacknowledge")
-def unacknowledge_book(book_id: int, series_id: int | None = Form(None), user: User = Depends(get_current_user)):
+def unacknowledge_book(
+    request: Request,
+    book_id: int,
+    series_id: int | None = Form(None),
+    user: User = Depends(get_current_user),
+):
     session = get_session()
     try:
         book = _require_subscription_for_book(session, user, book_id)
@@ -968,6 +987,8 @@ def unacknowledge_book(book_id: int, series_id: int | None = Form(None), user: U
             session.commit()
     finally:
         session.close()
+    if request.headers.get("accept") == "application/json":
+        return JSONResponse({"ok": True, "book_id": book_id, "acknowledged": False})
     redirect_url = f"/watchlist?series_id={series_id}" if series_id is not None else "/watchlist"
     return RedirectResponse(redirect_url, status_code=303)
 
