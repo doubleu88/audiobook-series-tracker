@@ -12,29 +12,35 @@
       <span class="meta-muted" id="watchlist-header-count">({{ unacknowledged_count }} / {{ entries|length }})</span>
     </h2>
     <div id="watchlist-header-controls" style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">
-      {% if abs_connected and entries %}
-      <div class="chip-island" id="state-chip-island" role="group" aria-label="Filter by library status">
-        <button type="button" class="filter-chip active" data-filter="all">
-          All <span class="chip-count" id="chip-count-all"></span>
-        </button>
-        <button type="button" class="filter-chip" data-filter="in_library">
-          In library <span class="chip-count" id="chip-count-in-library"></span>
-        </button>
-        <button type="button" class="filter-chip" data-filter="not_in_library">
-          Not in library <span class="chip-count" id="chip-count-not-in-library"></span>
-        </button>
+      <div id="watchlist-filter-controls" style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">
+        {% if abs_connected and entries %}
+        <div class="chip-island" id="state-chip-island" role="group" aria-label="Filter by library status">
+          <button type="button" class="filter-chip active" data-filter="all">
+            All <span class="chip-count" id="chip-count-all"></span>
+          </button>
+          <button type="button" class="filter-chip" data-filter="in_library">
+            In library <span class="chip-count" id="chip-count-in-library"></span>
+          </button>
+          <button type="button" class="filter-chip" data-filter="not_in_library">
+            Not in library <span class="chip-count" id="chip-count-not-in-library"></span>
+          </button>
+        </div>
+        {% endif %}
+        <label class="meta-muted" style="display:flex; align-items:center; gap:0.35rem; font-size:0.8rem; cursor:pointer;">
+          <input type="checkbox" id="hide-acknowledged-toggle" data-storage-key="abtracker-hide-acknowledged-watchlist" checked>
+          Hide acknowledged
+        </label>
       </div>
-      {% endif %}
-      <label class="meta-muted" style="display:flex; align-items:center; gap:0.35rem; font-size:0.8rem; cursor:pointer;">
-        <input type="checkbox" id="hide-acknowledged-toggle" data-storage-key="abtracker-hide-acknowledged-watchlist" checked>
-        Hide acknowledged
-      </label>
-      {% if unacknowledged_count > 0 %}
+      {% if entries %}
       <form method="post" id="acknowledge-all-form" action="/watchlist/acknowledge-all"
+            style="{{ '' if unacknowledged_count > 0 else 'display:none;' }}"
+            data-confirm-msg="Acknowledge all {{ unacknowledged_count }} book{{ "s" if unacknowledged_count != 1 else "" }}{{ " in " + filtered_series.name if filtered_series else "" }}?"
             onsubmit="return confirm('Acknowledge all {{ unacknowledged_count }} book{{ "s" if unacknowledged_count != 1 else "" }}{{ " in " + filtered_series.name if filtered_series else "" }}?');">
         {% if filtered_series %}<input type="hidden" name="series_id" value="{{ filtered_series.id }}">{% endif %}
-        <button class="btn" type="submit">
-          {{ "Acknowledge all in this series" if filtered_series else "Acknowledge all" }}
+        <input type="hidden" name="library_filter" id="acknowledge-all-filter" value="all">
+        <input type="hidden" name="book_ids" id="acknowledge-all-book-ids" value="">
+        <button class="btn" type="submit" id="acknowledge-all-btn">
+          {{ "Acknowledge all in this series" if filtered_series else "Acknowledge all" }} ({{ unacknowledged_count }})
         </button>
       </form>
       {% endif %}
@@ -76,7 +82,7 @@
     </thead>
     <tbody>
       {% for entry in entries %}
-      <tr data-series-name="{{ entry.series.name|lower }}" data-book-title="{{ entry.book.title|lower }}" data-acknowledged="{{ 'true' if entry.acknowledged else 'false' }}" data-in-library="{{ 'true' if entry.in_library else 'false' }}"{% if entry.acknowledged %} class="row-acknowledged"{% endif %}>
+      <tr data-book-id="{{ entry.book.id }}" data-series-name="{{ entry.series.name|lower }}" data-book-title="{{ entry.book.title|lower }}" data-acknowledged="{{ 'true' if entry.acknowledged else 'false' }}" data-in-library="{{ 'true' if entry.in_library else 'false' }}"{% if entry.acknowledged %} class="row-acknowledged"{% endif %}>
         <td>
           {% if entry.book.cover_image %}
             <img class="cover-sm" src="{{ entry.book.cover_image }}" alt="">

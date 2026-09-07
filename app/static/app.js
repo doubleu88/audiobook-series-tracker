@@ -134,6 +134,7 @@ function applyCombinedVisibility() {
 
   const watchlistRows = document.querySelectorAll("#watchlist-table-wrap tbody tr");
   const isWatchlist = watchlistRows.length > 0;
+  const ackTargetBookIds = [];
 
   document.querySelectorAll("[data-series-name]").forEach((el) => {
     const seriesName = el.dataset.seriesName || el.getAttribute("data-series-name") || "";
@@ -180,6 +181,24 @@ function applyCombinedVisibility() {
     }
 
     el.style.display = searchOk && ackOk && libOk ? "" : "none";
+
+    // Track unacknowledged books that match the active filter and search query for Acknowledge All
+    if (isWatchlist && searchOk && !isAck) {
+      let matchesFilter = false;
+      if (watchlistLibraryFilter === "all") {
+        matchesFilter = true;
+      } else if (watchlistLibraryFilter === "in_library" || watchlistLibraryFilter === "in_library_unacknowledged") {
+        matchesFilter = isInLib;
+      } else if (watchlistLibraryFilter === "not_in_library") {
+        matchesFilter = !isInLib;
+      }
+      if (matchesFilter) {
+        const bookId = el.getAttribute("data-book-id");
+        if (bookId) {
+          ackTargetBookIds.push(bookId);
+        }
+      }
+    }
   });
 
   const elCountAll = document.getElementById("chip-count-all");
@@ -196,9 +215,44 @@ function applyCombinedVisibility() {
   const isActionFilter = watchlistLibraryFilter === "in_library_unacknowledged" ||
                          watchlistLibraryFilter === "not_in_library_acknowledged" ||
                          watchlistLibraryFilter === "missing_acknowledged";
-  const headerControls = document.getElementById("watchlist-header-controls");
-  if (headerControls && isWatchlist) {
-    headerControls.classList.toggle("deemphasized", isActionFilter);
+  const filterControls = document.getElementById("watchlist-filter-controls");
+  if (filterControls && isWatchlist) {
+    filterControls.classList.toggle("deemphasized", isActionFilter);
+  }
+
+  const ackAllForm = document.getElementById("acknowledge-all-form");
+  const ackAllBtn = document.getElementById("acknowledge-all-btn");
+  const ackAllFilterInput = document.getElementById("acknowledge-all-filter");
+  const ackAllBookIdsInput = document.getElementById("acknowledge-all-book-ids");
+
+  if (ackAllForm && ackAllBtn) {
+    const ackCount = ackTargetBookIds.length;
+    if (ackCount === 0) {
+      ackAllForm.style.display = "none";
+    } else {
+      ackAllForm.style.display = "";
+      if (ackAllFilterInput) {
+        ackAllFilterInput.value = watchlistLibraryFilter;
+      }
+      if (ackAllBookIdsInput) {
+        ackAllBookIdsInput.value = ackTargetBookIds.join(",");
+      }
+
+      const watchlistWrap = document.getElementById("watchlist-table-wrap");
+      const seriesName = watchlistWrap?.dataset?.filteredSeries || "";
+      const isSeriesView = Boolean(seriesName || new URLSearchParams(window.location.search).get("series_id"));
+
+      const btnText = isSeriesView
+        ? `Acknowledge all in this series (${ackCount})`
+        : `Acknowledge all (${ackCount})`;
+      const noun = ackCount === 1 ? "book" : "books";
+      const confirmMsg = seriesName
+        ? `Acknowledge all ${ackCount} ${noun} in ${seriesName}?`
+        : `Acknowledge all ${ackCount} ${noun}?`;
+
+      ackAllBtn.textContent = btnText;
+      ackAllForm.dataset.confirmMsg = confirmMsg;
+    }
   }
 
   const ackToggle = document.getElementById("hide-acknowledged-toggle");
@@ -355,11 +409,6 @@ function updateWatchlistHeaderCounts() {
   if (headerCount) {
     headerCount.textContent = `(${unackCount} / ${totalCount})`;
   }
-
-  const ackAllForm = document.getElementById("acknowledge-all-form");
-  if (ackAllForm) {
-    ackAllForm.style.display = unackCount > 0 ? "" : "none";
-  }
 }
 
 function setupWatchlistRowActions() {
@@ -420,6 +469,67 @@ function setupWatchlistRowActions() {
       form.submit();
     }
   });
+
+  const ackAllForm = document.getElementById("acknowledge-all-form");
+  if (ackAllForm) {
+    ackAllForm.removeAttribute("onsubmit");
+    ackAllForm.addEventListener("submit", async (event) => {
+      const confirmMsg = ackAllForm.dataset.confirmMsg;
+      if (confirmMsg && !window.confirm(confirmMsg)) {
+        event.preventDefault();
+        return;
+      }
+
+      event.preventDefault();
+
+      const submitBtn = ackAllForm.querySelector("button[type=submit]");
+      if (submitBtn) submitBtn.disabled = true;
+
+      try {
+        const resp = await fetch(ackAllForm.action, {
+          method: "POST",
+          headers: { "Accept": "application/json" },
+          body: new FormData(ackAllForm),
+        });
+
+        if (!resp.ok && resp.status !== 303) {
+          HTMLFormElement.prototype.submit.call(ackAllForm);
+          return;
+        }
+
+        const data = await resp.json();
+        const ackedSet = new Set((data.acknowledged_ids || []).map(String));
+
+        const tbody = wrap.querySelector("tbody");
+        if (tbody) {
+          tbody.querySelectorAll("tr").forEach((row) => {
+            const bId = row.getAttribute("data-book-id");
+            if (ackedSet.has(bId)) {
+              row.setAttribute("data-acknowledged", "true");
+              row.dataset.acknowledged = "true";
+              row.classList.add("row-acknowledged");
+              const form = row.querySelector("form");
+              if (form) {
+                form.action = form.action.replace("/acknowledge", "/unacknowledge");
+                const btn = form.querySelector("button[type=submit]");
+                if (btn) {
+                  btn.textContent = "Watch";
+                  btn.disabled = false;
+                }
+              }
+            }
+          });
+        }
+
+        applyCombinedVisibility();
+        updateWatchlistHeaderCounts();
+      } catch (err) {
+        HTMLFormElement.prototype.submit.call(ackAllForm);
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
+      }
+    });
+  }
 }
 
 function safeGetStorage(key) {
@@ -461,9 +571,9 @@ function setupWatchlistFilterChips() {
                            watchlistLibraryFilter === "not_in_library_acknowledged" ||
                            watchlistLibraryFilter === "missing_acknowledged";
 
-    const headerControls = document.getElementById("watchlist-header-controls");
-    if (headerControls) {
-      headerControls.classList.toggle("deemphasized", isActionFilter);
+    const filterControls = document.getElementById("watchlist-filter-controls");
+    if (filterControls) {
+      filterControls.classList.toggle("deemphasized", isActionFilter);
     }
 
     if (stateIsland) {
@@ -554,8 +664,8 @@ function setupAcknowledgedToggle() {
     if (isActionFilter) {
       watchlistLibraryFilter = "all";
       safeSetStorage(WATCHLIST_LIB_FILTER_KEY, "all");
-      const headerControls = document.getElementById("watchlist-header-controls");
-      if (headerControls) headerControls.classList.remove("deemphasized");
+      const filterControls = document.getElementById("watchlist-filter-controls");
+      if (filterControls) filterControls.classList.remove("deemphasized");
       const stateIsland = document.getElementById("state-chip-island");
       if (stateIsland) {
         stateIsland.querySelectorAll(".filter-chip").forEach((btn) => {
