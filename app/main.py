@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from icalendar import Calendar, Event
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
+from sqlalchemy import and_
 
 from app.audiobookshelf import ABSClient, ABSError
 from app.auth import (
@@ -856,12 +857,19 @@ def download_book_grab(
     return RedirectResponse("/", status_code=303)
 
 
-def _watchlist_query(session, user: User, series_id: int | None = None, unacknowledged_only: bool = True):
+def _watchlist_query(
+    session,
+    user: User,
+    series_id: int | None = None,
+    unacknowledged_only: bool = True,
+    include_status: bool = False,
+):
     """Released books in the user's non-muted subscriptions. If unacknowledged_only
     is True, excludes books with an acknowledged UserBookStatus row. Optionally
     scoped to a single series, for the per-series view/bulk-acknowledge."""
+    entities = (Book, Series, UserBookStatus) if include_status else (Book, Series)
     query = (
-        session.query(Book, Series)
+        session.query(*entities)
         .join(Series)
         .join(Subscription, Subscription.series_id == Series.id)
         .filter(
@@ -871,6 +879,14 @@ def _watchlist_query(session, user: User, series_id: int | None = None, unacknow
             Book.release_date <= datetime.date.today(),
         )
     )
+    if include_status:
+        query = query.outerjoin(
+            UserBookStatus,
+            and_(
+                UserBookStatus.book_id == Book.id,
+                UserBookStatus.user_id == user.id,
+            ),
+        )
     if unacknowledged_only:
         acknowledged_book_ids = (
             session.query(UserBookStatus.book_id)
@@ -887,25 +903,17 @@ def _watchlist_query(session, user: User, series_id: int | None = None, unacknow
 def watchlist(request: Request, series_id: int | None = None, user: User = Depends(get_current_user)):
     session = get_session()
     try:
-        rows = _watchlist_query(session, user, series_id=series_id, unacknowledged_only=False).all()
-        book_ids = [book.id for book, _ in rows]
-        statuses = {
-            s.book_id: s
-            for s in session.query(UserBookStatus)
-            .filter(
-                UserBookStatus.user_id == user.id,
-                UserBookStatus.book_id.in_(book_ids),
-            )
-            .all()
-        } if book_ids else {}
+        rows = _watchlist_query(
+            session, user, series_id=series_id, unacknowledged_only=False, include_status=True
+        ).all()
         entries = [
             {
                 "book": book,
                 "series": series,
-                "acknowledged": bool(statuses.get(book.id) and statuses[book.id].acknowledged),
-                "in_library": bool(statuses.get(book.id) and statuses[book.id].in_library),
+                "acknowledged": bool(status and status.acknowledged),
+                "in_library": bool(status and status.in_library),
             }
-            for book, series in rows
+            for book, series, status in rows
         ]
         unacknowledged_count = sum(1 for e in entries if not e["acknowledged"])
         abs_connected = bool(user.abs_base_url and user.abs_library_id)
