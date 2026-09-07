@@ -948,6 +948,17 @@ def _unacknowledge_book(session, user: User, book: Book) -> None:
         status.acknowledged_at = None
 
 
+def _json_or_redirect(
+    request: Request,
+    payload: dict,
+    redirect_url: str,
+    status_code: int = 200,
+) -> Response:
+    if request.headers.get("accept") == "application/json":
+        return JSONResponse(payload, status_code=status_code)
+    return RedirectResponse(redirect_url, status_code=303)
+
+
 @app.post("/books/{book_id}/acknowledge")
 def acknowledge_book(
     request: Request,
@@ -963,13 +974,12 @@ def acknowledge_book(
             session.commit()
     finally:
         session.close()
-    if request.headers.get("accept") == "application/json":
-        return JSONResponse({"ok": True, "book_id": book_id, "acknowledged": True})
-    # Acknowledging one book from a filtered series view should stay on that
-    # series so the user can keep clicking through it, not bounce to the
-    # full mixed watchlist.
     redirect_url = f"/watchlist?series_id={series_id}" if series_id is not None else "/watchlist"
-    return RedirectResponse(redirect_url, status_code=303)
+    return _json_or_redirect(
+        request,
+        {"ok": True, "book_id": book_id, "acknowledged": True},
+        redirect_url,
+    )
 
 
 @app.post("/books/{book_id}/unacknowledge")
@@ -987,10 +997,12 @@ def unacknowledge_book(
             session.commit()
     finally:
         session.close()
-    if request.headers.get("accept") == "application/json":
-        return JSONResponse({"ok": True, "book_id": book_id, "acknowledged": False})
     redirect_url = f"/watchlist?series_id={series_id}" if series_id is not None else "/watchlist"
-    return RedirectResponse(redirect_url, status_code=303)
+    return _json_or_redirect(
+        request,
+        {"ok": True, "book_id": book_id, "acknowledged": False},
+        redirect_url,
+    )
 
 
 @app.post("/watchlist/acknowledge-all")
@@ -1038,16 +1050,17 @@ def acknowledge_all(
             acknowledged_ids.append(book.id)
         session.commit()
 
-        if request.headers.get("accept") == "application/json":
-            return JSONResponse({"ok": True, "acknowledged_ids": acknowledged_ids, "count": len(acknowledged_ids)})
-
         if series_id is not None:
             remaining_unack = _watchlist_query(session, user, series_id=series_id).count()
             redirect_url = f"/watchlist?series_id={series_id}" if remaining_unack > 0 else "/watchlist"
         else:
             redirect_url = "/watchlist"
 
-        return RedirectResponse(redirect_url, status_code=303)
+        return _json_or_redirect(
+            request,
+            {"ok": True, "acknowledged_ids": acknowledged_ids, "count": len(acknowledged_ids)},
+            redirect_url,
+        )
     finally:
         session.close()
 
