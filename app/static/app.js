@@ -123,7 +123,9 @@ function setupThemeToggle() {
 let searchQuery = "";
 let hideAcknowledged = true;
 let watchlistLibraryFilter = "all";
+let watchlistLastStateFilter = "all";
 const WATCHLIST_LIB_FILTER_KEY = "abtracker-watchlist-library-filter";
+const WATCHLIST_LAST_STATE_FILTER_KEY = "abtracker-watchlist-last-state-filter";
 
 function normalizeWatchlistFilter(filter) {
   return filter === "missing_acknowledged" ? "not_in_library_acknowledged" : filter;
@@ -563,17 +565,20 @@ function setupWatchlistFilterChips() {
   if (!stateIsland && !actionIsland) return;
 
   const validState = ["all", "in_library", "not_in_library"];
-  const validAction = ["in_library_unacknowledged", "not_in_library_acknowledged", "missing_acknowledged"];
 
-  let lastStateFilter = "all";
+  const storedLastState = safeGetStorage(WATCHLIST_LAST_STATE_FILTER_KEY);
+  if (storedLastState && validState.includes(storedLastState)) {
+    watchlistLastStateFilter = storedLastState;
+  }
+
   const stored = safeGetStorage(WATCHLIST_LIB_FILTER_KEY);
   if (stored) {
     if (validState.includes(stored)) {
       watchlistLibraryFilter = stored;
-      lastStateFilter = stored;
-    } else if (validAction.includes(stored)) {
+      watchlistLastStateFilter = stored;
+      safeSetStorage(WATCHLIST_LAST_STATE_FILTER_KEY, watchlistLastStateFilter);
+    } else if (isWatchlistActionFilter(stored)) {
       watchlistLibraryFilter = normalizeWatchlistFilter(stored);
-      lastStateFilter = "all";
     }
   }
 
@@ -610,14 +615,15 @@ function setupWatchlistFilterChips() {
       const isAlreadyActive = normalizeWatchlistFilter(watchlistLibraryFilter) === normalizeWatchlistFilter(filter);
       if (isAlreadyActive) {
         // Toggle off back to last state filter
-        watchlistLibraryFilter = lastStateFilter;
+        watchlistLibraryFilter = watchlistLastStateFilter;
       } else {
         watchlistLibraryFilter = normalizeWatchlistFilter(filter);
       }
     } else {
       // Clicked a state filter in the upper island
       watchlistLibraryFilter = filter;
-      lastStateFilter = filter;
+      watchlistLastStateFilter = filter;
+      safeSetStorage(WATCHLIST_LAST_STATE_FILTER_KEY, watchlistLastStateFilter);
     }
 
     safeSetStorage(WATCHLIST_LIB_FILTER_KEY, watchlistLibraryFilter);
@@ -666,7 +672,9 @@ function setupAcknowledgedToggle() {
     const isActionFilter = isWatchlistActionFilter(watchlistLibraryFilter);
     if (isActionFilter) {
       watchlistLibraryFilter = "all";
+      watchlistLastStateFilter = "all";
       safeSetStorage(WATCHLIST_LIB_FILTER_KEY, "all");
+      safeSetStorage(WATCHLIST_LAST_STATE_FILTER_KEY, "all");
       const filterControls = document.getElementById("watchlist-filter-controls");
       if (filterControls) filterControls.classList.remove("deemphasized");
       const stateIsland = document.getElementById("state-chip-island");
