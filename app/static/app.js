@@ -436,7 +436,17 @@ function setupWatchlistRowActions() {
         body: new FormData(form),
       });
 
-      if (!resp.ok && resp.status !== 303) {
+      if (!resp.ok || resp.redirected) {
+        if (resp.redirected && (resp.url.includes("/login") || !resp.headers.get("content-type")?.includes("application/json"))) {
+          window.location.href = resp.url || "/login";
+          return;
+        }
+        form.submit();
+        return;
+      }
+
+      const data = await resp.json();
+      if (!data.ok) {
         form.submit();
         return;
       }
@@ -492,12 +502,20 @@ function setupWatchlistRowActions() {
           body: new FormData(ackAllForm),
         });
 
-        if (!resp.ok && resp.status !== 303) {
+        if (!resp.ok || resp.redirected) {
+          if (resp.redirected && (resp.url.includes("/login") || !resp.headers.get("content-type")?.includes("application/json"))) {
+            window.location.href = resp.url || "/login";
+            return;
+          }
           HTMLFormElement.prototype.submit.call(ackAllForm);
           return;
         }
 
         const data = await resp.json();
+        if (!data.ok) {
+          HTMLFormElement.prototype.submit.call(ackAllForm);
+          return;
+        }
         const ackedSet = new Set((data.acknowledged_ids || []).map(String));
 
         const tbody = wrap.querySelector("tbody");
