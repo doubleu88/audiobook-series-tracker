@@ -125,6 +125,15 @@ let hideAcknowledged = true;
 let watchlistLibraryFilter = "all";
 const WATCHLIST_LIB_FILTER_KEY = "abtracker-watchlist-library-filter";
 
+function normalizeWatchlistFilter(filter) {
+  return filter === "missing_acknowledged" ? "not_in_library_acknowledged" : filter;
+}
+
+function isWatchlistActionFilter(filter) {
+  const norm = normalizeWatchlistFilter(filter);
+  return norm === "in_library_unacknowledged" || norm === "not_in_library_acknowledged";
+}
+
 function applyCombinedVisibility() {
   let countAll = 0;
   let countInLib = 0;
@@ -212,9 +221,7 @@ function applyCombinedVisibility() {
   if (elCountInLibUnack) elCountInLibUnack.textContent = countInLibUnack;
   if (elCountMissingAck) elCountMissingAck.textContent = countMissingAck;
 
-  const isActionFilter = watchlistLibraryFilter === "in_library_unacknowledged" ||
-                         watchlistLibraryFilter === "not_in_library_acknowledged" ||
-                         watchlistLibraryFilter === "missing_acknowledged";
+  const isActionFilter = isWatchlistActionFilter(watchlistLibraryFilter);
   const filterControls = document.getElementById("watchlist-filter-controls");
   if (filterControls && isWatchlist) {
     filterControls.classList.toggle("deemphasized", isActionFilter);
@@ -310,7 +317,7 @@ function applyCombinedVisibility() {
         watchlistHint.textContent = isSeriesView
           ? "You're all caught up! No unacknowledged books in this series."
           : "You're all caught up! No unacknowledged books are in your library.";
-      } else if (watchlistLibraryFilter === "not_in_library_acknowledged" || watchlistLibraryFilter === "missing_acknowledged") {
+      } else if (normalizeWatchlistFilter(watchlistLibraryFilter) === "not_in_library_acknowledged") {
         watchlistHint.textContent = isSeriesView
           ? "Great news! No acknowledged books in this series are missing from your library."
           : "Great news! No acknowledged books are missing from your library.";
@@ -579,15 +586,13 @@ function setupWatchlistFilterChips() {
       watchlistLibraryFilter = stored;
       lastStateFilter = stored;
     } else if (validAction.includes(stored)) {
-      watchlistLibraryFilter = stored === "missing_acknowledged" ? "not_in_library_acknowledged" : stored;
+      watchlistLibraryFilter = normalizeWatchlistFilter(stored);
       lastStateFilter = "all";
     }
   }
 
   function updateActiveChip() {
-    const isActionFilter = watchlistLibraryFilter === "in_library_unacknowledged" ||
-                           watchlistLibraryFilter === "not_in_library_acknowledged" ||
-                           watchlistLibraryFilter === "missing_acknowledged";
+    const isActionFilter = isWatchlistActionFilter(watchlistLibraryFilter);
 
     const filterControls = document.getElementById("watchlist-filter-controls");
     if (filterControls) {
@@ -604,8 +609,7 @@ function setupWatchlistFilterChips() {
     if (actionIsland) {
       actionIsland.querySelectorAll(".filter-chip").forEach((btn) => {
         const f = btn.getAttribute("data-filter");
-        const match = (f === watchlistLibraryFilter) ||
-                      (f === "not_in_library_acknowledged" && watchlistLibraryFilter === "missing_acknowledged");
+        const match = normalizeWatchlistFilter(f) === normalizeWatchlistFilter(watchlistLibraryFilter);
         btn.classList.toggle("active", match);
       });
     }
@@ -614,18 +618,15 @@ function setupWatchlistFilterChips() {
   updateActiveChip();
 
   function handleFilterClick(filter) {
-    const isClickedAction = filter === "in_library_unacknowledged" ||
-                            filter === "not_in_library_acknowledged" ||
-                            filter === "missing_acknowledged";
+    const isClickedAction = isWatchlistActionFilter(filter);
 
     if (isClickedAction) {
-      const isAlreadyActive = watchlistLibraryFilter === filter ||
-                              (filter === "not_in_library_acknowledged" && watchlistLibraryFilter === "missing_acknowledged");
+      const isAlreadyActive = normalizeWatchlistFilter(watchlistLibraryFilter) === normalizeWatchlistFilter(filter);
       if (isAlreadyActive) {
         // Toggle off back to last state filter
         watchlistLibraryFilter = lastStateFilter;
       } else {
-        watchlistLibraryFilter = filter === "missing_acknowledged" ? "not_in_library_acknowledged" : filter;
+        watchlistLibraryFilter = normalizeWatchlistFilter(filter);
       }
     } else {
       // Clicked a state filter in the upper island
@@ -676,9 +677,7 @@ function setupAcknowledgedToggle() {
     hideAcknowledged = checkbox.checked;
     safeSetStorage(storageKey, hideAcknowledged ? "true" : "false");
 
-    const isActionFilter = watchlistLibraryFilter === "in_library_unacknowledged" ||
-                           watchlistLibraryFilter === "not_in_library_acknowledged" ||
-                           watchlistLibraryFilter === "missing_acknowledged";
+    const isActionFilter = isWatchlistActionFilter(watchlistLibraryFilter);
     if (isActionFilter) {
       watchlistLibraryFilter = "all";
       safeSetStorage(WATCHLIST_LIB_FILTER_KEY, "all");
