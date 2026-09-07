@@ -966,15 +966,21 @@ def acknowledge_book(
     series_id: int | None = Form(None),
     user: User = Depends(get_current_user),
 ):
+    redirect_url = f"/watchlist?series_id={series_id}" if series_id is not None else "/watchlist"
     session = get_session()
     try:
         book = _require_subscription_for_book(session, user, book_id)
-        if book is not None:
-            _acknowledge_book(session, user, book)
-            session.commit()
+        if book is None:
+            return _json_or_redirect(
+                request,
+                {"ok": False, "error": "Book not found or not subscribed"},
+                redirect_url,
+                status_code=404,
+            )
+        _acknowledge_book(session, user, book)
+        session.commit()
     finally:
         session.close()
-    redirect_url = f"/watchlist?series_id={series_id}" if series_id is not None else "/watchlist"
     return _json_or_redirect(
         request,
         {"ok": True, "book_id": book_id, "acknowledged": True},
@@ -989,15 +995,21 @@ def unacknowledge_book(
     series_id: int | None = Form(None),
     user: User = Depends(get_current_user),
 ):
+    redirect_url = f"/watchlist?series_id={series_id}" if series_id is not None else "/watchlist"
     session = get_session()
     try:
         book = _require_subscription_for_book(session, user, book_id)
-        if book is not None:
-            _unacknowledge_book(session, user, book)
-            session.commit()
+        if book is None:
+            return _json_or_redirect(
+                request,
+                {"ok": False, "error": "Book not found or not subscribed"},
+                redirect_url,
+                status_code=404,
+            )
+        _unacknowledge_book(session, user, book)
+        session.commit()
     finally:
         session.close()
-    redirect_url = f"/watchlist?series_id={series_id}" if series_id is not None else "/watchlist"
     return _json_or_redirect(
         request,
         {"ok": True, "book_id": book_id, "acknowledged": False},
