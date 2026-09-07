@@ -134,6 +134,23 @@ function isWatchlistActionFilter(filter) {
   return norm === "in_library_unacknowledged" || norm === "not_in_library_acknowledged";
 }
 
+function rowMatchesWatchlistFilter(isInLib, isAck, hideAck, filter) {
+  const ackVisible = !(hideAck && isAck);
+  switch (normalizeWatchlistFilter(filter)) {
+    case "in_library":
+      return ackVisible && isInLib;
+    case "not_in_library":
+      return ackVisible && !isInLib;
+    case "in_library_unacknowledged":
+      return isInLib && !isAck;
+    case "not_in_library_acknowledged":
+      return !isInLib && isAck;
+    case "all":
+    default:
+      return ackVisible;
+  }
+}
+
 function applyCombinedVisibility() {
   let countAll = 0;
   let countInLib = 0;
@@ -158,54 +175,23 @@ function applyCombinedVisibility() {
     const isInLib = inLibAttr === "true";
 
     if (isWatchlist && hasLibData && searchOk) {
-      const ackEligible = !(hideAcknowledged && isAck);
-      if (ackEligible) {
-        countAll++;
-        if (isInLib) countInLib++;
-        else countNotInLib++;
-      }
-      if (isInLib && !isAck) {
-        countInLibUnack++;
-      }
-      if (!isInLib && isAck) {
-        countMissingAck++;
-      }
+      if (rowMatchesWatchlistFilter(isInLib, isAck, hideAcknowledged, "all")) countAll++;
+      if (rowMatchesWatchlistFilter(isInLib, isAck, hideAcknowledged, "in_library")) countInLib++;
+      if (rowMatchesWatchlistFilter(isInLib, isAck, hideAcknowledged, "not_in_library")) countNotInLib++;
+      if (rowMatchesWatchlistFilter(isInLib, isAck, hideAcknowledged, "in_library_unacknowledged")) countInLibUnack++;
+      if (rowMatchesWatchlistFilter(isInLib, isAck, hideAcknowledged, "not_in_library_acknowledged")) countMissingAck++;
     }
 
-    let ackOk = !(hideAcknowledged && isAck);
-    let libOk = true;
-
-    if (hasLibData) {
-      if (watchlistLibraryFilter === "in_library") {
-        libOk = isInLib;
-      } else if (watchlistLibraryFilter === "not_in_library") {
-        libOk = !isInLib;
-      } else if (watchlistLibraryFilter === "in_library_unacknowledged") {
-        libOk = isInLib && !isAck;
-        ackOk = true;
-      } else if (watchlistLibraryFilter === "not_in_library_acknowledged" || watchlistLibraryFilter === "missing_acknowledged") {
-        libOk = !isInLib && isAck;
-        ackOk = true; // explicitly display acknowledged books for this audit filter
-      }
-    }
-
-    el.style.display = searchOk && ackOk && libOk ? "" : "none";
+    const rowVisible = searchOk && (hasLibData
+      ? rowMatchesWatchlistFilter(isInLib, isAck, hideAcknowledged, watchlistLibraryFilter)
+      : !(hideAcknowledged && isAck));
+    el.style.display = rowVisible ? "" : "none";
 
     // Track unacknowledged books that match the active filter and search query for Acknowledge All
-    if (isWatchlist && searchOk && !isAck) {
-      let matchesFilter = false;
-      if (watchlistLibraryFilter === "all") {
-        matchesFilter = true;
-      } else if (watchlistLibraryFilter === "in_library" || watchlistLibraryFilter === "in_library_unacknowledged") {
-        matchesFilter = isInLib;
-      } else if (watchlistLibraryFilter === "not_in_library") {
-        matchesFilter = !isInLib;
-      }
-      if (matchesFilter) {
-        const bookId = el.getAttribute("data-book-id");
-        if (bookId) {
-          ackTargetBookIds.push(bookId);
-        }
+    if (isWatchlist && !isAck && rowVisible) {
+      const bookId = el.getAttribute("data-book-id");
+      if (bookId) {
+        ackTargetBookIds.push(bookId);
       }
     }
   });
