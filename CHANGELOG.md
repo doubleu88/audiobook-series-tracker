@@ -5,6 +5,11 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.14.0] - 2026-09-08
+
+- Add filters to the watchlist to allow querying based on the ABS integration's "library" badges. Also add a couple of quick tabs for a particularly common task, reconciling books being watched but actually in the library (users will probably remove them from the watchlist); and books "acknowledged" but actually not in the library (which will possibly be more common since sometime you don't want novellas or prequels; nonetheless it's also possible it's a true mismatch).
+- Also added AJAX updates and a stable default sort order to the page to make clicking "Watch" or "Acknowledge" a bit less jarring if you were about to click a few books in a row.
+
 ## [1.13.7] - 2026-09-06
 
 - README: note that Google/Apple Calendar can take 12-48h to show events after subscribing to the `.ics` feed (they poll on their own schedule, not on demand), and document the one-time Import workaround to load events immediately.
