@@ -912,6 +912,7 @@ def watchlist(request: Request, series_id: int | None = None, user: User = Depen
                 "series": series,
                 "acknowledged": bool(status and status.acknowledged),
                 "in_library": bool(status and status.in_library),
+                "library_checked": bool(status and status.checked_at is not None),
             }
             for book, series, status in rows
         ]

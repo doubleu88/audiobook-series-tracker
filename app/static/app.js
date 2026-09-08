@@ -428,7 +428,12 @@ function setupWatchlistRowActions() {
       const resp = await fetch(form.action, {
         method: "POST",
         headers: { "Accept": "application/json" },
-        body: new FormData(form),
+        // Encode as the same application/x-www-form-urlencoded a native form submit
+        // would use. A raw FormData body forces multipart/form-data, and a form with
+        // no fields (e.g. an unfiltered watchlist row, which has no series_id input)
+        // then serializes to a zero-part multipart body that python-multipart can't
+        // parse, so every click 400s and falls back to a full-page submit.
+        body: new URLSearchParams(new FormData(form)),
       });
 
       if (!resp.ok || resp.redirected) {
@@ -494,7 +499,7 @@ function setupWatchlistRowActions() {
         const resp = await fetch(ackAllForm.action, {
           method: "POST",
           headers: { "Accept": "application/json" },
-          body: new FormData(ackAllForm),
+          body: new URLSearchParams(new FormData(ackAllForm)),
         });
 
         if (!resp.ok || resp.redirected) {
