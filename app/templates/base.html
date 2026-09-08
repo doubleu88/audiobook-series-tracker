@@ -237,6 +237,85 @@
     .theme-option:hover { color: var(--text); }
     .theme-option.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 
+    .chip-island {
+      display: inline-flex;
+      align-items: center;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 2px;
+      position: relative;
+    }
+    .chip-island .filter-chip {
+      background: transparent;
+      border: none;
+      border-radius: 999px;
+      padding: 0.28rem 0.7rem;
+      color: var(--text-muted);
+      font-size: 0.78rem;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      position: relative;
+      transition: background 0.15s ease, color 0.15s ease;
+      white-space: nowrap;
+    }
+    .chip-island .filter-chip:hover {
+      color: var(--text);
+      background: var(--surface-hover);
+    }
+    .chip-island .filter-chip.active {
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .chip-island .filter-chip .chip-count {
+      font-size: 0.72rem;
+      opacity: 0.85;
+      background: rgba(128, 128, 128, 0.18);
+      padding: 0.05rem 0.4rem;
+      border-radius: 999px;
+    }
+    .chip-island .filter-chip.active .chip-count {
+      background: var(--accent-soft);
+      opacity: 1;
+    }
+    .chip-island .filter-chip * { pointer-events: none; }
+
+    /* Hairline vertical divider between chips in each island */
+    .chip-island .filter-chip + .filter-chip::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 22%;
+      height: 56%;
+      width: 1px;
+      background: var(--border);
+      pointer-events: none;
+      transition: opacity 0.15s;
+    }
+    .chip-island .filter-chip.active::before,
+    .chip-island .filter-chip:hover::before,
+    .chip-island .filter-chip.active + .filter-chip::before,
+    .chip-island .filter-chip:hover + .filter-chip::before {
+      opacity: 0;
+    }
+
+    #watchlist-filter-controls {
+      transition: opacity 0.2s ease;
+    }
+    #watchlist-filter-controls.deemphasized {
+      opacity: 0.55;
+    }
+    #watchlist-filter-controls.deemphasized:hover {
+      opacity: 0.95;
+    }
+    #acknowledge-all-form .btn {
+      opacity: 1;
+    }
+
     section.block { margin-top: 2.25rem; }
 
     .section-head {
@@ -382,6 +461,7 @@
     th.sortable-col { cursor: pointer; user-select: none; }
     th.sortable-col:hover { color: var(--text); }
     th.sortable-col .sort-indicator { color: var(--accent); }
+    .cell-nowrap { white-space: nowrap; }
 
     .series-table-wrap {
       background: var(--surface);
@@ -585,7 +665,7 @@
   {% endblock %}
   {% block content %}{% endblock %}
   {% if user %}
-  <script src="/static/app.js" defer></script>
+  <script src="/static/app.js?v={{ app_version }}" defer></script>
   {% endif %}
 </body>
 </html>

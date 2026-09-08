@@ -117,24 +117,145 @@ function setupThemeToggle() {
   });
 }
 
-// The search filter and the "hide acknowledged" toggle both hide/show the
-// same [data-series-name] elements (recently-released cards in particular
-// are covered by both). Two independent handlers each setting el.style.display
-// would fight each other — whichever ran last would win outright, ignoring
-// the other's condition. Instead, both conditions are combined here: an
-// element shows only if it passes the search (matching series name or book
-// title, if present) AND isn't hidden-by-acknowledged.
+// The search filter, the "hide acknowledged" toggle, and the library filter chips
+// all hide/show the same [data-series-name] elements. They are combined here: an
+// element shows only if it passes search, library filter, and acknowledged state.
 let searchQuery = "";
 let hideAcknowledged = true;
+let watchlistLibraryFilter = "all";
+let watchlistLastStateFilter = "all";
+const WATCHLIST_LIB_FILTER_KEY = "abtracker-watchlist-library-filter";
+const WATCHLIST_LAST_STATE_FILTER_KEY = "abtracker-watchlist-last-state-filter";
+
+function normalizeWatchlistFilter(filter) {
+  return filter === "missing_acknowledged" ? "not_in_library_acknowledged" : filter;
+}
+
+function isWatchlistActionFilter(filter) {
+  const norm = normalizeWatchlistFilter(filter);
+  return norm === "in_library_unacknowledged" || norm === "not_in_library_acknowledged";
+}
+
+function rowMatchesWatchlistFilter(isInLib, isAck, hideAck, filter) {
+  const ackVisible = !(hideAck && isAck);
+  switch (normalizeWatchlistFilter(filter)) {
+    case "in_library":
+      return ackVisible && isInLib;
+    case "not_in_library":
+      return ackVisible && !isInLib;
+    case "in_library_unacknowledged":
+      return isInLib && !isAck;
+    case "not_in_library_acknowledged":
+      return !isInLib && isAck;
+    case "all":
+    default:
+      return ackVisible;
+  }
+}
 
 function applyCombinedVisibility() {
+  let countAll = 0;
+  let countInLib = 0;
+  let countNotInLib = 0;
+  let countInLibUnack = 0;
+  let countMissingAck = 0;
+
+  const watchlistRows = document.querySelectorAll("#watchlist-table-wrap tbody tr");
+  const isWatchlist = watchlistRows.length > 0;
+  const ackTargetBookIds = [];
+
   document.querySelectorAll("[data-series-name]").forEach((el) => {
-    const seriesMatch = el.dataset.seriesName && el.dataset.seriesName.includes(searchQuery);
-    const bookMatch = el.dataset.bookTitle && el.dataset.bookTitle.includes(searchQuery);
+    const seriesName = el.dataset.seriesName || el.getAttribute("data-series-name") || "";
+    const bookTitle = el.dataset.bookTitle || el.getAttribute("data-book-title") || "";
+    const seriesMatch = seriesName.includes(searchQuery);
+    const bookMatch = bookTitle.includes(searchQuery);
     const searchOk = !searchQuery || Boolean(seriesMatch || bookMatch);
-    const ackOk = !(hideAcknowledged && el.dataset.acknowledged === "true");
-    el.style.display = searchOk && ackOk ? "" : "none";
+
+    const isAck = (el.dataset.acknowledged || el.getAttribute("data-acknowledged")) === "true";
+    const inLibAttr = el.getAttribute("data-in-library");
+    const hasLibData = inLibAttr !== null;
+    const isInLib = inLibAttr === "true";
+
+    if (isWatchlist && hasLibData && searchOk) {
+      if (rowMatchesWatchlistFilter(isInLib, isAck, hideAcknowledged, "all")) countAll++;
+      if (rowMatchesWatchlistFilter(isInLib, isAck, hideAcknowledged, "in_library")) countInLib++;
+      if (rowMatchesWatchlistFilter(isInLib, isAck, hideAcknowledged, "not_in_library")) countNotInLib++;
+      if (rowMatchesWatchlistFilter(isInLib, isAck, hideAcknowledged, "in_library_unacknowledged")) countInLibUnack++;
+      if (rowMatchesWatchlistFilter(isInLib, isAck, hideAcknowledged, "not_in_library_acknowledged")) countMissingAck++;
+    }
+
+    const rowVisible = searchOk && (hasLibData
+      ? rowMatchesWatchlistFilter(isInLib, isAck, hideAcknowledged, watchlistLibraryFilter)
+      : !(hideAcknowledged && isAck));
+    el.style.display = rowVisible ? "" : "none";
+
+    // Track unacknowledged books that match the active filter and search query for Acknowledge All
+    if (isWatchlist && !isAck && rowVisible) {
+      const bookId = el.getAttribute("data-book-id");
+      if (bookId) {
+        ackTargetBookIds.push(bookId);
+      }
+    }
   });
+
+  const elCountAll = document.getElementById("chip-count-all");
+  const elCountInLib = document.getElementById("chip-count-in-library");
+  const elCountNotInLib = document.getElementById("chip-count-not-in-library");
+  const elCountInLibUnack = document.getElementById("chip-count-in-lib-unack");
+  const elCountMissingAck = document.getElementById("chip-count-missing-ack");
+  if (elCountAll) elCountAll.textContent = countAll;
+  if (elCountInLib) elCountInLib.textContent = countInLib;
+  if (elCountNotInLib) elCountNotInLib.textContent = countNotInLib;
+  if (elCountInLibUnack) elCountInLibUnack.textContent = countInLibUnack;
+  if (elCountMissingAck) elCountMissingAck.textContent = countMissingAck;
+
+  const isActionFilter = isWatchlistActionFilter(watchlistLibraryFilter);
+  const filterControls = document.getElementById("watchlist-filter-controls");
+  if (filterControls && isWatchlist) {
+    filterControls.classList.toggle("deemphasized", isActionFilter);
+  }
+
+  const ackAllForm = document.getElementById("acknowledge-all-form");
+  const ackAllBtn = document.getElementById("acknowledge-all-btn");
+  const ackAllFilterInput = document.getElementById("acknowledge-all-filter");
+  const ackAllBookIdsInput = document.getElementById("acknowledge-all-book-ids");
+
+  if (ackAllForm && ackAllBtn) {
+    const ackCount = ackTargetBookIds.length;
+    if (ackCount === 0) {
+      ackAllForm.style.display = "none";
+    } else {
+      ackAllForm.style.display = "";
+      if (ackAllFilterInput) {
+        ackAllFilterInput.value = watchlistLibraryFilter;
+      }
+      if (ackAllBookIdsInput) {
+        ackAllBookIdsInput.value = ackTargetBookIds.join(",");
+      }
+
+      const watchlistWrap = document.getElementById("watchlist-table-wrap");
+      const seriesName = watchlistWrap?.dataset?.filteredSeries || "";
+      const isSeriesView = Boolean(seriesName || new URLSearchParams(window.location.search).get("series_id"));
+
+      const btnText = isSeriesView
+        ? `Acknowledge all in this series (${ackCount})`
+        : `Acknowledge all (${ackCount})`;
+      const noun = ackCount === 1 ? "book" : "books";
+      const confirmMsg = seriesName
+        ? `Acknowledge all ${ackCount} ${noun} in ${seriesName}?`
+        : `Acknowledge all ${ackCount} ${noun}?`;
+
+      ackAllBtn.textContent = btnText;
+      ackAllForm.dataset.confirmMsg = confirmMsg;
+    }
+  }
+
+  const ackToggle = document.getElementById("hide-acknowledged-toggle");
+  if (ackToggle && isWatchlist) {
+    ackToggle.disabled = false;
+    ackToggle.checked = hideAcknowledged;
+  }
+
   const hint = document.getElementById("recent-books-all-hidden-hint");
   const grid = document.getElementById("recent-books-grid");
   if (hint && grid) {
@@ -155,9 +276,48 @@ function applyCombinedVisibility() {
     const rows = watchlistWrap.querySelectorAll("tbody tr");
     const anyVisible = Array.from(rows).some((row) => row.style.display !== "none");
     if (rows.length && !anyVisible) {
-      watchlistHint.textContent = searchQuery
-        ? "No watchlist books match your search."
-        : "All caught up — every book in this view is acknowledged. Toggle “Hide acknowledged” off to see them.";
+      const isSeriesView = Boolean(
+        watchlistWrap.dataset.filteredSeries ||
+        new URLSearchParams(window.location.search).get("series_id")
+      );
+
+      if (searchQuery) {
+        watchlistHint.textContent = isSeriesView
+          ? "No books in this series match your search."
+          : "No watchlist books match your search.";
+      } else if (watchlistLibraryFilter === "in_library") {
+        watchlistHint.textContent = hideAcknowledged
+          ? (isSeriesView
+              ? "No unacknowledged library books in this series. Toggle “Hide acknowledged” off to see library books in this series."
+              : "No unacknowledged library books. Toggle “Hide acknowledged” off to see library books.")
+          : (isSeriesView
+              ? "No library books in this series."
+              : "No library books in this view.");
+      } else if (watchlistLibraryFilter === "not_in_library") {
+        watchlistHint.textContent = hideAcknowledged
+          ? (isSeriesView
+              ? "No unacknowledged non-library books in this series. Toggle “Hide acknowledged” off to see non-library books in this series."
+              : "No unacknowledged non-library books. Toggle “Hide acknowledged” off to see non-library books.")
+          : (isSeriesView
+              ? "No non-library books in this series."
+              : "No non-library books in this view.");
+      } else if (watchlistLibraryFilter === "in_library_unacknowledged") {
+        watchlistHint.textContent = isSeriesView
+          ? "You're all caught up! No unacknowledged books in this series."
+          : "You're all caught up! No unacknowledged books are in your library.";
+      } else if (normalizeWatchlistFilter(watchlistLibraryFilter) === "not_in_library_acknowledged") {
+        watchlistHint.textContent = isSeriesView
+          ? "Great news! No acknowledged books in this series are missing from your library."
+          : "Great news! No acknowledged books are missing from your library.";
+      } else {
+        watchlistHint.textContent = hideAcknowledged
+          ? (isSeriesView
+              ? "All caught up — every book in this series is acknowledged. Toggle “Hide acknowledged” off to see all books in this series."
+              : "All caught up — every book in this view is acknowledged. Toggle “Hide acknowledged” off to see all books.")
+          : (isSeriesView
+              ? "No books in this series."
+              : "No books in this view.");
+      }
       watchlistHint.style.display = "";
       watchlistWrap.style.display = "none";
     } else {
@@ -181,34 +341,318 @@ function setupSortableTables() {
     const headers = Array.from(table.querySelectorAll("thead th[data-sort-index]"));
     if (!headers.length) return;
 
+    const storageKey = table.id ? `abtracker-table-sort-${table.id}` : null;
+
+    function applySort(th, dir, persist = true) {
+      const index = parseInt(th.dataset.sortIndex, 10);
+      headers.forEach((h) => {
+        delete h.dataset.sortDir;
+        h.querySelector(".sort-indicator")?.remove();
+      });
+      th.dataset.sortDir = dir;
+      const indicator = document.createElement("span");
+      indicator.className = "sort-indicator";
+      indicator.textContent = dir === "asc" ? " ▲" : " ▼";
+      th.appendChild(indicator);
+
+      const tbody = table.querySelector("tbody");
+      const rows = Array.from(tbody.querySelectorAll("tr"));
+      rows.sort((a, b) => {
+        const av = a.children[index]?.textContent.trim() || "";
+        const bv = b.children[index]?.textContent.trim() || "";
+        const cmp = av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" });
+        return dir === "asc" ? cmp : -cmp;
+      });
+      rows.forEach((row) => tbody.appendChild(row));
+
+      if (persist && storageKey) {
+        safeSetStorage(storageKey, JSON.stringify({ sortIndex: th.dataset.sortIndex, dir }));
+      }
+    }
+
     headers.forEach((th) => {
       th.classList.add("sortable-col");
       th.addEventListener("click", () => {
-        const index = parseInt(th.dataset.sortIndex, 10);
         const dir = th.dataset.sortDir === "asc" ? "desc" : "asc";
-
-        headers.forEach((h) => {
-          delete h.dataset.sortDir;
-          h.querySelector(".sort-indicator")?.remove();
-        });
-        th.dataset.sortDir = dir;
-        const indicator = document.createElement("span");
-        indicator.className = "sort-indicator";
-        indicator.textContent = dir === "asc" ? " ▲" : " ▼";
-        th.appendChild(indicator);
-
-        const tbody = table.querySelector("tbody");
-        const rows = Array.from(tbody.querySelectorAll("tr"));
-        rows.sort((a, b) => {
-          const av = a.children[index].textContent.trim();
-          const bv = b.children[index].textContent.trim();
-          const cmp = av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" });
-          return dir === "asc" ? cmp : -cmp;
-        });
-        rows.forEach((row) => tbody.appendChild(row));
+        applySort(th, dir, true);
       });
     });
+
+    if (storageKey) {
+      const savedRaw = safeGetStorage(storageKey);
+      if (savedRaw) {
+        try {
+          const saved = JSON.parse(savedRaw);
+          const matchingTh = headers.find((h) => h.dataset.sortIndex === String(saved.sortIndex));
+          if (matchingTh && (saved.dir === "asc" || saved.dir === "desc")) {
+            applySort(matchingTh, saved.dir, false);
+          }
+        } catch (e) {}
+      }
+    }
   });
+}
+
+function updateWatchlistHeaderCounts() {
+  const tbody = document.querySelector("#watchlist-table-wrap tbody");
+  if (!tbody) return;
+  const rows = Array.from(tbody.querySelectorAll("tr"));
+  const unackCount = rows.filter((r) => r.getAttribute("data-acknowledged") !== "true").length;
+  const totalCount = rows.length;
+
+  const headerCount = document.getElementById("watchlist-header-count");
+  if (headerCount) {
+    headerCount.textContent = `(${unackCount} / ${totalCount})`;
+  }
+}
+
+function setupWatchlistRowActions() {
+  const wrap = document.getElementById("watchlist-table-wrap");
+  if (!wrap) return;
+
+  wrap.addEventListener("submit", async (event) => {
+    const form = event.target;
+    if (!form || !form.action) return;
+
+    const isAck = form.action.includes("/acknowledge");
+    const isUnack = form.action.includes("/unacknowledge");
+    if (!isAck && !isUnack) return;
+
+    event.preventDefault();
+
+    const row = form.closest("tr");
+    const submitBtn = form.querySelector("button[type=submit]");
+    if (submitBtn) submitBtn.disabled = true;
+
+    try {
+      const resp = await fetch(form.action, {
+        method: "POST",
+        headers: { "Accept": "application/json" },
+        // Encode as the same application/x-www-form-urlencoded a native form submit
+        // would use. A raw FormData body forces multipart/form-data, and a form with
+        // no fields (e.g. an unfiltered watchlist row, which has no series_id input)
+        // then serializes to a zero-part multipart body that python-multipart can't
+        // parse, so every click 400s and falls back to a full-page submit.
+        body: new URLSearchParams(new FormData(form)),
+      });
+
+      if (!resp.ok || resp.redirected) {
+        if (resp.redirected && (resp.url.includes("/login") || !resp.headers.get("content-type")?.includes("application/json"))) {
+          window.location.href = resp.url || "/login";
+          return;
+        }
+        form.submit();
+        return;
+      }
+
+      const data = await resp.json();
+      if (!data.ok) {
+        form.submit();
+        return;
+      }
+
+      if (row) {
+        if (isAck) {
+          row.setAttribute("data-acknowledged", "true");
+          row.dataset.acknowledged = "true";
+          row.classList.add("row-acknowledged");
+          form.action = form.action.replace("/acknowledge", "/unacknowledge");
+          if (submitBtn) {
+            submitBtn.textContent = "Watch";
+            submitBtn.disabled = false;
+          }
+        } else {
+          row.setAttribute("data-acknowledged", "false");
+          row.dataset.acknowledged = "false";
+          row.classList.remove("row-acknowledged");
+          form.action = form.action.replace("/unacknowledge", "/acknowledge");
+          if (submitBtn) {
+            submitBtn.textContent = "Acknowledge";
+            submitBtn.disabled = false;
+          }
+        }
+
+        applyCombinedVisibility();
+        updateWatchlistHeaderCounts();
+      }
+    } catch (err) {
+      form.submit();
+    }
+  });
+
+  const ackAllForm = document.getElementById("acknowledge-all-form");
+  if (ackAllForm) {
+    ackAllForm.removeAttribute("onsubmit");
+    ackAllForm.addEventListener("submit", async (event) => {
+      const confirmMsg = ackAllForm.dataset.confirmMsg;
+      if (confirmMsg && !window.confirm(confirmMsg)) {
+        event.preventDefault();
+        return;
+      }
+
+      event.preventDefault();
+
+      const submitBtn = ackAllForm.querySelector("button[type=submit]");
+      if (submitBtn) submitBtn.disabled = true;
+
+      try {
+        const resp = await fetch(ackAllForm.action, {
+          method: "POST",
+          headers: { "Accept": "application/json" },
+          body: new URLSearchParams(new FormData(ackAllForm)),
+        });
+
+        if (!resp.ok || resp.redirected) {
+          if (resp.redirected && (resp.url.includes("/login") || !resp.headers.get("content-type")?.includes("application/json"))) {
+            window.location.href = resp.url || "/login";
+            return;
+          }
+          HTMLFormElement.prototype.submit.call(ackAllForm);
+          return;
+        }
+
+        const data = await resp.json();
+        if (!data.ok) {
+          HTMLFormElement.prototype.submit.call(ackAllForm);
+          return;
+        }
+        const ackedSet = new Set((data.acknowledged_ids || []).map(String));
+
+        const tbody = wrap.querySelector("tbody");
+        if (tbody) {
+          tbody.querySelectorAll("tr").forEach((row) => {
+            const bId = row.getAttribute("data-book-id");
+            if (ackedSet.has(bId)) {
+              row.setAttribute("data-acknowledged", "true");
+              row.dataset.acknowledged = "true";
+              row.classList.add("row-acknowledged");
+              const form = row.querySelector("form");
+              if (form) {
+                form.action = form.action.replace("/acknowledge", "/unacknowledge");
+                const btn = form.querySelector("button[type=submit]");
+                if (btn) {
+                  btn.textContent = "Watch";
+                  btn.disabled = false;
+                }
+              }
+            }
+          });
+        }
+
+        applyCombinedVisibility();
+        updateWatchlistHeaderCounts();
+      } catch (err) {
+        HTMLFormElement.prototype.submit.call(ackAllForm);
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
+      }
+    });
+  }
+}
+
+function safeGetStorage(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch (e) {
+    return null;
+  }
+}
+
+function safeSetStorage(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (e) {}
+}
+
+function setupWatchlistFilterChips() {
+  const stateIsland = document.getElementById("state-chip-island");
+  const actionIsland = document.getElementById("action-chip-island");
+  if (!stateIsland && !actionIsland) return;
+
+  const validState = ["all", "in_library", "not_in_library"];
+
+  const storedLastState = safeGetStorage(WATCHLIST_LAST_STATE_FILTER_KEY);
+  if (storedLastState && validState.includes(storedLastState)) {
+    watchlistLastStateFilter = storedLastState;
+  }
+
+  const stored = safeGetStorage(WATCHLIST_LIB_FILTER_KEY);
+  if (stored) {
+    if (validState.includes(stored)) {
+      watchlistLibraryFilter = stored;
+      watchlistLastStateFilter = stored;
+      safeSetStorage(WATCHLIST_LAST_STATE_FILTER_KEY, watchlistLastStateFilter);
+    } else if (isWatchlistActionFilter(stored)) {
+      watchlistLibraryFilter = normalizeWatchlistFilter(stored);
+    }
+  }
+
+  function updateActiveChip() {
+    const isActionFilter = isWatchlistActionFilter(watchlistLibraryFilter);
+
+    const filterControls = document.getElementById("watchlist-filter-controls");
+    if (filterControls) {
+      filterControls.classList.toggle("deemphasized", isActionFilter);
+    }
+
+    if (stateIsland) {
+      stateIsland.querySelectorAll(".filter-chip").forEach((btn) => {
+        const f = btn.getAttribute("data-filter");
+        btn.classList.toggle("active", !isActionFilter && f === watchlistLibraryFilter);
+      });
+    }
+
+    if (actionIsland) {
+      actionIsland.querySelectorAll(".filter-chip").forEach((btn) => {
+        const f = btn.getAttribute("data-filter");
+        const match = normalizeWatchlistFilter(f) === normalizeWatchlistFilter(watchlistLibraryFilter);
+        btn.classList.toggle("active", match);
+      });
+    }
+  }
+
+  updateActiveChip();
+
+  function handleFilterClick(filter) {
+    const isClickedAction = isWatchlistActionFilter(filter);
+
+    if (isClickedAction) {
+      const isAlreadyActive = normalizeWatchlistFilter(watchlistLibraryFilter) === normalizeWatchlistFilter(filter);
+      if (isAlreadyActive) {
+        // Toggle off back to last state filter
+        watchlistLibraryFilter = watchlistLastStateFilter;
+      } else {
+        watchlistLibraryFilter = normalizeWatchlistFilter(filter);
+      }
+    } else {
+      // Clicked a state filter in the upper island
+      watchlistLibraryFilter = filter;
+      watchlistLastStateFilter = filter;
+      safeSetStorage(WATCHLIST_LAST_STATE_FILTER_KEY, watchlistLastStateFilter);
+    }
+
+    safeSetStorage(WATCHLIST_LIB_FILTER_KEY, watchlistLibraryFilter);
+    updateActiveChip();
+    applyCombinedVisibility();
+  }
+
+  if (stateIsland) {
+    stateIsland.addEventListener("click", (event) => {
+      const btn = event.target.closest(".filter-chip");
+      if (!btn) return;
+      const filter = btn.getAttribute("data-filter");
+      if (filter) handleFilterClick(filter);
+    });
+  }
+
+  if (actionIsland) {
+    actionIsland.addEventListener("click", (event) => {
+      const btn = event.target.closest(".filter-chip");
+      if (!btn) return;
+      const filter = btn.getAttribute("data-filter");
+      if (filter) handleFilterClick(filter);
+    });
+  }
 }
 
 // Dashboard and Watchlist each have their own "Hide acknowledged" checkbox,
@@ -221,23 +665,54 @@ function setupAcknowledgedToggle() {
   if (!checkbox) return;
 
   const storageKey = checkbox.dataset.storageKey;
-  const stored = localStorage.getItem(storageKey);
+  const stored = safeGetStorage(storageKey);
   hideAcknowledged = stored === null ? true : stored === "true";
   checkbox.checked = hideAcknowledged;
   applyCombinedVisibility();
 
   checkbox.addEventListener("change", () => {
     hideAcknowledged = checkbox.checked;
-    localStorage.setItem(storageKey, hideAcknowledged ? "true" : "false");
+    safeSetStorage(storageKey, hideAcknowledged ? "true" : "false");
+
+    const isActionFilter = isWatchlistActionFilter(watchlistLibraryFilter);
+    if (isActionFilter) {
+      watchlistLibraryFilter = "all";
+      watchlistLastStateFilter = "all";
+      safeSetStorage(WATCHLIST_LIB_FILTER_KEY, "all");
+      safeSetStorage(WATCHLIST_LAST_STATE_FILTER_KEY, "all");
+      const filterControls = document.getElementById("watchlist-filter-controls");
+      if (filterControls) filterControls.classList.remove("deemphasized");
+      const stateIsland = document.getElementById("state-chip-island");
+      if (stateIsland) {
+        stateIsland.querySelectorAll(".filter-chip").forEach((btn) => {
+          btn.classList.toggle("active", btn.getAttribute("data-filter") === "all");
+        });
+      }
+      const actionIsland = document.getElementById("action-chip-island");
+      if (actionIsland) {
+        actionIsland.querySelectorAll(".filter-chip").forEach((btn) => {
+          btn.classList.remove("active");
+        });
+      }
+    }
+
     applyCombinedVisibility();
   });
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+function initApp() {
   setupPushButton();
   setupMenus();
   setupThemeToggle();
+  setupWatchlistFilterChips();
   setupAcknowledgedToggle();
   setupTopbarSearchFilter();
   setupSortableTables();
-});
+  setupWatchlistRowActions();
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initApp);
+} else {
+  initApp();
+}
