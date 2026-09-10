@@ -700,6 +700,113 @@ function setupAcknowledgedToggle() {
   });
 }
 
+function setupAbsScanStatus() {
+  const scanBtn = document.getElementById("abs-scan-btn");
+  const progressContainer = document.getElementById("abs-progress-container");
+  const progressBar = document.getElementById("abs-progress-bar");
+  const progressMsg = document.getElementById("abs-progress-msg");
+  const lastScanned = document.getElementById("abs-last-scanned");
+  const lastScannedTime = document.getElementById("abs-last-scanned-time");
+  const scanForm = document.getElementById("abs-scan-form");
+
+  if (!scanBtn || !progressContainer) return;
+
+  let pollInterval = null;
+
+  function setButtonScanning(scanning) {
+    scanBtn.disabled = scanning;
+    scanBtn.style.opacity = scanning ? "0.6" : "";
+    scanBtn.style.cursor = scanning ? "not-allowed" : "";
+    scanBtn.textContent = scanning ? "⏳ Scan in progress..." : "🔄 Scan library now";
+  }
+
+  function updateProgressUI(data) {
+    const isScanning = Boolean(data.scanning);
+    const progress = data.progress || {};
+
+    setButtonScanning(isScanning);
+
+    if (isScanning) {
+      progressContainer.style.display = "";
+      if (lastScanned) lastScanned.style.display = "none";
+      const pct = typeof progress.percent === "number" ? progress.percent : 15;
+      if (progressBar) progressBar.style.width = pct + "%";
+      if (progressMsg) progressMsg.textContent = progress.message || "Library scan in progress...";
+    } else {
+      if (progressBar) progressBar.style.width = "100%";
+      if (progressMsg && progress.message) progressMsg.textContent = progress.message;
+
+      setTimeout(() => {
+        progressContainer.style.display = "none";
+      }, 1500);
+
+      if (data.last_scanned_at) {
+        if (lastScannedTime) lastScannedTime.textContent = data.last_scanned_at;
+        if (lastScanned) lastScanned.style.display = "";
+      }
+      stopPolling();
+    }
+  }
+
+  async function pollStatus() {
+    try {
+      const resp = await fetch("/account/library-status/progress", {
+        headers: { "Accept": "application/json" },
+      });
+      if (!resp.ok) {
+        stopPolling();
+        return;
+      }
+      const data = await resp.json();
+      updateProgressUI(data);
+    } catch (e) {
+      // Network hiccup; keep polling
+    }
+  }
+
+  function startPolling() {
+    if (pollInterval) return;
+    pollStatus();
+    pollInterval = setInterval(pollStatus, 1500);
+  }
+
+  function stopPolling() {
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
+  }
+
+  if (scanBtn.disabled) {
+    startPolling();
+  }
+
+  if (scanForm) {
+    scanForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      setButtonScanning(true);
+      progressContainer.style.display = "";
+      if (progressBar) progressBar.style.width = "5%";
+      if (progressMsg) progressMsg.textContent = "Connecting to Audiobookshelf...";
+      if (lastScanned) lastScanned.style.display = "none";
+
+      try {
+        const resp = await fetch(scanForm.action, {
+          method: "POST",
+          headers: { "Accept": "application/json" },
+        });
+        if (!resp.ok && resp.status !== 303) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+      } catch (err) {
+        scanForm.submit();
+        return;
+      }
+      startPolling();
+    });
+  }
+}
+
 function initApp() {
   setupPushButton();
   setupMenus();
@@ -709,6 +816,7 @@ function initApp() {
   setupTopbarSearchFilter();
   setupSortableTables();
   setupWatchlistRowActions();
+  setupAbsScanStatus();
 }
 
 if (document.readyState === "loading") {

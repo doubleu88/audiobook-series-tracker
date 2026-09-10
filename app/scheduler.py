@@ -1,5 +1,6 @@
 import datetime
 import logging
+import threading
 import time
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -182,18 +183,119 @@ def refresh_all_series() -> None:
             logger.exception("Unexpected error refreshing series id %s", series_id)
 
 
-def check_availability_for_user(user_id: int) -> None:
+_scanning_users: set[int] = set()
+_scan_progress: dict[int, dict] = {}
+_scan_lock = threading.Lock()
+
+
+def is_user_scanning(user_id: int) -> bool:
+    with _scan_lock:
+        return user_id in _scanning_users
+
+
+def get_user_scan_progress(user_id: int) -> dict | None:
+    with _scan_lock:
+        if user_id in _scan_progress:
+            return dict(_scan_progress[user_id])
+        if user_id in _scanning_users:
+            return {"scanning": True, "phase": "starting", "message": "Starting scan...", "percent": 0}
+        return None
+
+
+def mark_user_scanning(user_id: int) -> bool:
+    with _scan_lock:
+        if user_id in _scanning_users:
+            return False
+        _scanning_users.add(user_id)
+        _scan_progress[user_id] = {
+            "scanning": True,
+            "phase": "starting",
+            "message": "Starting scan...",
+            "percent": 5,
+            "error": None,
+        }
+        return True
+
+
+def run_scan_for_user(user_id: int) -> None:
     session = get_session()
     try:
         user = session.get(User, user_id)
         if user is None or not (user.abs_base_url and user.abs_api_key and user.abs_library_id):
+            with _scan_lock:
+                _scan_progress[user_id] = {
+                    "scanning": False,
+                    "phase": "error",
+                    "message": "Audiobookshelf is not configured.",
+                    "error": "Not configured",
+                }
             return
 
+        logger.info(
+            "Starting Audiobookshelf library scan for user '%s' (library: %s)",
+            user.username,
+            user.abs_library_id,
+        )
+        with _scan_lock:
+            _scan_progress[user_id] = {
+                "scanning": True,
+                "phase": "fetching",
+                "message": "Connecting to Audiobookshelf...",
+                "percent": 10,
+                "error": None,
+            }
+
+        def on_fetch_progress(page: int, total_pages: int | None, items_fetched: int, total_items: int | None) -> None:
+            with _scan_lock:
+                if total_pages and total_pages > 0:
+                    pct = min(90, int((page / total_pages) * 90))
+                    msg = f"Fetching library: page {page} of {total_pages} ({items_fetched} ASINs found)..."
+                else:
+                    pct = min(90, page * 20)
+                    msg = f"Fetching library: page {page} ({items_fetched} ASINs found)..."
+                _scan_progress[user_id] = {
+                    "scanning": True,
+                    "phase": "fetching",
+                    "page": page,
+                    "total_pages": total_pages,
+                    "items_fetched": items_fetched,
+                    "total_items": total_items,
+                    "percent": pct,
+                    "message": msg,
+                    "error": None,
+                }
+
+        t0 = time.time()
         try:
-            asins = ABSClient(user.abs_base_url, user.abs_api_key).list_asins_in_library(user.abs_library_id)
+            asins = ABSClient(user.abs_base_url, user.abs_api_key).list_asins_in_library(
+                user.abs_library_id, progress_cb=on_fetch_progress
+            )
         except ABSError as exc:
             logger.warning("Failed to check Audiobookshelf availability for user %s: %s", user.username, exc)
+            with _scan_lock:
+                _scan_progress[user_id] = {
+                    "scanning": False,
+                    "phase": "error",
+                    "message": f"Scan failed: {exc}",
+                    "error": str(exc),
+                }
             return
+
+        fetch_duration = time.time() - t0
+        logger.info(
+            "Audiobookshelf scan for user '%s': fetched %d ASINs in %.1fs. Reconciling with subscribed books...",
+            user.username,
+            len(asins),
+            fetch_duration,
+        )
+        with _scan_lock:
+            _scan_progress[user_id] = {
+                "scanning": True,
+                "phase": "matching",
+                "percent": 92,
+                "message": "Reconciling with subscribed books...",
+                "error": None,
+            }
 
         books = (
             session.query(Book)
@@ -207,21 +309,72 @@ def check_availability_for_user(user_id: int) -> None:
             for s in session.query(UserBookStatus).filter_by(user_id=user.id).all()
         }
         now = datetime.datetime.utcnow()
+        checked_count = 0
+        already_in_library = 0
+        newly_in_library = 0
+        not_in_library = 0
+
         for book in books:
             if not book.released:
                 continue
+            checked_count += 1
             status = statuses.get(book.id)
             if status is not None and status.in_library:
+                already_in_library += 1
+                status.checked_at = now
                 continue  # already confirmed present; a book later removed from ABS won't un-flip here
-            in_library = book.asin.upper() in asins
+            in_library = (book.asin or "").upper() in asins
+            if in_library:
+                newly_in_library += 1
+            else:
+                not_in_library += 1
+
             if status is None:
                 status = UserBookStatus(user_id=user.id, book_id=book.id)
                 session.add(status)
             status.in_library = in_library
             status.checked_at = now
         session.commit()
+        total_duration = time.time() - t0
+        logger.info(
+            "Audiobookshelf scan completed for user '%s' in %.1fs: %d released books evaluated (%d already in library, %d newly found, %d not in library)",
+            user.username,
+            total_duration,
+            checked_count,
+            already_in_library,
+            newly_in_library,
+            not_in_library,
+        )
+        formatted_time = now.strftime("%Y-%m-%d %H:%M UTC")
+        with _scan_lock:
+            _scan_progress[user_id] = {
+                "scanning": False,
+                "phase": "complete",
+                "percent": 100,
+                "message": f"Scan completed: {checked_count} books evaluated ({already_in_library + newly_in_library} in library)",
+                "last_scanned_at": formatted_time,
+                "error": None,
+            }
+    except Exception as exc:  # noqa: BLE001 - one bad scan shouldn't crash the scheduler
+        logger.exception("Unexpected error during Audiobookshelf scan for user id %s", user_id)
+        with _scan_lock:
+            _scan_progress[user_id] = {
+                "scanning": False,
+                "phase": "error",
+                "message": f"Scan error: {exc}",
+                "error": str(exc),
+            }
     finally:
         session.close()
+        with _scan_lock:
+            _scanning_users.discard(user_id)
+
+
+def check_availability_for_user(user_id: int) -> None:
+    if not mark_user_scanning(user_id):
+        logger.info("Audiobookshelf scan already in progress for user id %s; skipping", user_id)
+        return
+    run_scan_for_user(user_id)
 
 
 def check_availability_all_users() -> None:
@@ -293,12 +446,20 @@ def start_scheduler() -> BackgroundScheduler:
         refresh_all_series,
         CronTrigger(hour="0,8,16", minute=0, timezone="America/Chicago"),
         id="refresh_all_series",
+        misfire_grace_time=3600,
     )
     scheduler.add_job(
-        check_availability_all_users, "interval", hours=6, id="check_abs_availability"
+        check_availability_all_users,
+        "interval",
+        hours=6,
+        id="check_abs_availability",
+        misfire_grace_time=3600,
     )
     scheduler.add_job(
-        send_weekly_digests, CronTrigger(day_of_week="mon", hour=13, timezone="UTC"), id="weekly_digest"
+        send_weekly_digests,
+        CronTrigger(day_of_week="mon", hour=13, timezone="UTC"),
+        id="weekly_digest",
+        misfire_grace_time=3600,
     )
     scheduler.start()
     logger.info("Background scheduler started (refresh every 8h at 12am/8am/4pm Central, ABS check every 6h, digest Mondays)")

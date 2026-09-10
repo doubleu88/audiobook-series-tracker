@@ -1,11 +1,13 @@
 import logging
+import math
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
-TIMEOUT = 15.0
+TIMEOUT = 45.0
 PAGE_SIZE = 500
 
 
@@ -24,9 +26,10 @@ class ABSClient:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
 
-    def _get(self, path: str, params: dict | None = None) -> dict:
+    def _get(self, path: str, params: dict | None = None, client: httpx.Client | None = None) -> dict:
+        caller = client.get if client is not None else httpx.get
         try:
-            response = httpx.get(
+            response = caller(
                 f"{self.base_url}{path}",
                 params=params,
                 headers={"Authorization": f"Bearer {self.api_key}"},
@@ -58,22 +61,41 @@ class ABSClient:
             if lib.get("mediaType") == "book"
         ]
 
-    def list_asins_in_library(self, library_id: str) -> set[str]:
+    def list_asins_in_library(
+        self,
+        library_id: str,
+        progress_cb: Callable[[int, int | None, int, int | None], None] | None = None,
+    ) -> set[str]:
         asins: set[str] = set()
         page = 0
-        while True:
-            data = self._get(
-                f"/api/libraries/{library_id}/items",
-                params={"minified": 1, "limit": PAGE_SIZE, "page": page},
-            )
-            items = data.get("results", [])
-            for item in items:
-                asin = (item.get("media") or {}).get("metadata", {}).get("asin")
-                if asin:
-                    asins.add(asin.upper())
-            if len(items) < PAGE_SIZE:
-                break
-            page += 1
+        total_items: int | None = None
+        total_pages: int | None = None
+        with httpx.Client(timeout=TIMEOUT) as client:
+            while True:
+                data = self._get(
+                    f"/api/libraries/{library_id}/items",
+                    params={"minified": 1, "limit": PAGE_SIZE, "page": page},
+                    client=client,
+                )
+                items = data.get("results", [])
+                if total_items is None and "total" in data and isinstance(data["total"], int):
+                    total_items = data["total"]
+                    total_pages = math.ceil(total_items / PAGE_SIZE) if total_items > 0 else 1
+
+                for item in items:
+                    asin = (item.get("media") or {}).get("metadata", {}).get("asin")
+                    if asin:
+                        asins.add(asin.upper())
+
+                logger.debug(
+                    "Audiobookshelf library %s: page %d returned %d items (%d ASINs so far)",
+                    library_id, page, len(items), len(asins),
+                )
+                if progress_cb:
+                    progress_cb(page + 1, total_pages, len(asins), total_items)
+                if len(items) < PAGE_SIZE:
+                    break
+                page += 1
         return asins
 
     def test_connection(self) -> None:

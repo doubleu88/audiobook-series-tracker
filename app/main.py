@@ -11,8 +11,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from icalendar import Calendar, Event
 from pydantic import BaseModel
+from sqlalchemy import and_, func
 from starlette.middleware.sessions import SessionMiddleware
-from sqlalchemy import and_
 
 from app.audiobookshelf import ABSClient, ABSError
 from app.auth import (
@@ -28,7 +28,14 @@ from app.logging_config import configure_logging, is_debug_enabled, set_debug_lo
 from app.models import Book, PushSubscription, Series, Subscription, User, UserBookStatus
 from app.prowlarr import ProwlarrClient, ProwlarrError
 from app.push import get_vapid_public_key_b64
-from app.scheduler import check_availability_for_user, refresh_series, start_scheduler
+from app.scheduler import (
+    get_user_scan_progress,
+    is_user_scanning,
+    mark_user_scanning,
+    refresh_series,
+    run_scan_for_user,
+    start_scheduler,
+)
 from app.scraper import SeriesPageError, fetch_series, find_best_match, search_series
 from app.timeutil import humanize_relative, shift_months
 from app.version import CURRENT_VERSION, get_update_status
@@ -310,6 +317,17 @@ def regenerate_calendar_token(request: Request, user: User = Depends(get_current
     return RedirectResponse(request.headers.get("referer") or "/", status_code=303)
 
 
+def _json_or_redirect(
+    request: Request,
+    payload: dict,
+    redirect_url: str,
+    status_code: int = 200,
+) -> Response:
+    if request.headers.get("accept") == "application/json":
+        return JSONResponse(payload, status_code=status_code)
+    return RedirectResponse(redirect_url, status_code=303)
+
+
 def _integrations_context(request: Request, user: User, session, abs_error: str | None = None, prowlarr_error: str | None = None) -> dict:
     db_user = session.get(User, user.id)
     abs_libraries = []
@@ -329,6 +347,12 @@ def _integrations_context(request: Request, user: User, session, abs_error: str 
             prowlarr_error = str(exc)
             logger.warning("Prowlarr check failed for user %s: %s", db_user.username, exc)
 
+    last_scanned_at = (
+        session.query(func.max(UserBookStatus.checked_at))
+        .filter(UserBookStatus.user_id == user.id)
+        .scalar()
+    )
+
     return {
         "request": request,
         "user": db_user,
@@ -336,6 +360,9 @@ def _integrations_context(request: Request, user: User, session, abs_error: str 
         "abs_error": abs_error,
         "prowlarr_error": prowlarr_error,
         "prowlarr_ok": prowlarr_ok,
+        "last_scanned_at": last_scanned_at,
+        "abs_scanning": is_user_scanning(user.id),
+        "abs_scan_progress": get_user_scan_progress(user.id),
     }
 
 
@@ -378,11 +405,16 @@ def save_audiobookshelf_library(
     session = get_session()
     try:
         db_user = session.get(User, user.id)
-        db_user.abs_library_id = abs_library_id
+        if db_user.abs_library_id != abs_library_id:
+            db_user.abs_library_id = abs_library_id
+            session.query(UserBookStatus).filter_by(user_id=user.id).update(
+                {"in_library": False, "checked_at": None}
+            )
         session.commit()
     finally:
         session.close()
-    background_tasks.add_task(check_availability_for_user, user.id)
+    if mark_user_scanning(user.id):
+        background_tasks.add_task(run_scan_for_user, user.id)
     return RedirectResponse("/account/integrations", status_code=303)
 
 
@@ -438,9 +470,44 @@ def disconnect_prowlarr(user: User = Depends(get_current_user)):
 
 
 @app.post("/account/library-status/refresh")
-def refresh_library_status(request: Request, user: User = Depends(get_current_user)):
-    check_availability_for_user(user.id)
-    return RedirectResponse(request.headers.get("referer") or "/", status_code=303)
+def refresh_library_status(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(get_current_user),
+):
+    started = mark_user_scanning(user.id)
+    if started:
+        background_tasks.add_task(run_scan_for_user, user.id)
+    return _json_or_redirect(
+        request,
+        {"ok": True, "scanning": True, "started": started},
+        request.headers.get("referer") or "/account/integrations",
+    )
+
+
+@app.get("/account/library-status/progress")
+def library_status_progress(user: User = Depends(get_current_user)):
+    scanning = is_user_scanning(user.id)
+    progress = get_user_scan_progress(user.id)
+    session = get_session()
+    try:
+        last_scanned_at = (
+            session.query(func.max(UserBookStatus.checked_at))
+            .filter(UserBookStatus.user_id == user.id)
+            .scalar()
+        )
+    finally:
+        session.close()
+
+    formatted_last_scanned = (
+        last_scanned_at.strftime("%Y-%m-%d %H:%M UTC") if last_scanned_at else None
+    )
+
+    return {
+        "scanning": scanning,
+        "progress": progress,
+        "last_scanned_at": formatted_last_scanned,
+    }
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -956,16 +1023,6 @@ def _unacknowledge_book(session, user: User, book: Book) -> None:
         status.acknowledged = False
         status.acknowledged_at = None
 
-
-def _json_or_redirect(
-    request: Request,
-    payload: dict,
-    redirect_url: str,
-    status_code: int = 200,
-) -> Response:
-    if request.headers.get("accept") == "application/json":
-        return JSONResponse(payload, status_code=status_code)
-    return RedirectResponse(redirect_url, status_code=303)
 
 
 @app.post("/books/{book_id}/acknowledge")

@@ -41,6 +41,29 @@
     </form>
     {% endif %}
 
+    {% if user.abs_library_id %}
+    <div style="margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+      <form method="post" action="/account/library-status/refresh" id="abs-scan-form">
+        <button class="btn" id="abs-scan-btn" type="submit" {% if abs_scanning %}disabled style="opacity: 0.6; cursor: not-allowed;"{% endif %}>
+          {{ "⏳ Scan in progress..." if abs_scanning else "🔄 Scan library now" }}
+        </button>
+      </form>
+      <div id="abs-scan-status-wrap" style="margin-top: 0.75rem;">
+        <div id="abs-progress-container" style="{% if not abs_scanning %}display: none;{% endif %} margin-bottom: 0.5rem;">
+          <div style="height: 6px; width: 100%; max-width: 320px; background: var(--border); border-radius: 3px; overflow: hidden;">
+            <div id="abs-progress-bar" style="height: 100%; width: {{ abs_scan_progress.percent if abs_scan_progress and abs_scan_progress.percent is not none else 0 }}%; background: var(--accent); transition: width 0.3s ease;"></div>
+          </div>
+          <p id="abs-progress-msg" class="meta-muted" style="margin-top: 0.35rem; font-size: 0.85rem;">
+            {{ abs_scan_progress.message if abs_scan_progress and abs_scan_progress.message else "Library scan in progress..." }}
+          </p>
+        </div>
+        <p id="abs-last-scanned" class="meta-muted" style="font-size: 0.85rem; margin: 0; {% if not last_scanned_at or abs_scanning %}display: none;{% endif %}">
+          Last scan completed: <span id="abs-last-scanned-time">{{ last_scanned_at.strftime("%Y-%m-%d %H:%M UTC") if last_scanned_at else "" }}</span>
+        </p>
+      </div>
+    </div>
+    {% endif %}
+
     {% if user.abs_base_url %}
     <form method="post" action="/account/integrations/audiobookshelf/disconnect" style="margin-top: 0.8rem;">
       <button class="link" type="submit">Disconnect Audiobookshelf</button>
