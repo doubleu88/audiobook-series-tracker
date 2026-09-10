@@ -5,6 +5,10 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.15.0] - 2026-09-10
+
+- Make Audiobookshelf integration (enabled under the user menu -> Integrations) more tolerant of huge or slow ABS server. Increased margin for error in scan startup timing (old scanner would fail if the scan was started 1 second too late, new timeout is 1 hour), add a "perform scan" button with a progress bar to Integrations page.
+
 ## [1.14.0] - 2026-09-08
 
 - Add filters to the watchlist to allow querying based on the ABS integration's "library" badges. Also add a couple of quick tabs for a particularly common task, reconciling books being watched but actually in the library (users will probably remove them from the watchlist); and books "acknowledged" but actually not in the library (which will possibly be more common since sometime you don't want novellas or prequels; nonetheless it's also possible it's a true mismatch).
