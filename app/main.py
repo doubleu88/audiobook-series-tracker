@@ -35,6 +35,7 @@ from app.scheduler import (
     refresh_series,
     run_scan_for_user,
     start_scheduler,
+    update_series_from_scraped,
 )
 from app.scraper import SeriesPageError, fetch_series, find_best_match, search_series
 from app.timeutil import humanize_relative, shift_months
@@ -675,6 +676,8 @@ def _subscribe_to_url(session, user: User, url: str) -> int:
         session.add(series)
         session.commit()
 
+    update_series_from_scraped(session, series, scraped)
+
     already_subscribed = session.query(Subscription).filter_by(user_id=user.id, series_id=series.id).first()
     if already_subscribed is None:
         session.add(Subscription(user_id=user.id, series_id=series.id))
@@ -691,14 +694,13 @@ def add_series_form(request: Request, user: User = Depends(get_current_user)):
 @app.post("/add")
 def add_series(
     request: Request,
-    background_tasks: BackgroundTasks,
     url: str = Form(...),
     user: User = Depends(get_current_user),
 ):
     session = get_session()
     try:
         try:
-            series_id = _subscribe_to_url(session, user, url)
+            _subscribe_to_url(session, user, url)
         except SeriesPageError as exc:
             logger.warning("Failed to add series from %r for user %s: %s", url, user.username, exc)
             return templates.TemplateResponse(
@@ -707,7 +709,6 @@ def add_series(
     finally:
         session.close()
 
-    background_tasks.add_task(refresh_series, series_id)
     return RedirectResponse("/", status_code=303)
 
 
@@ -764,24 +765,20 @@ def import_preview(request: Request, lines: str = Form(...), user: User = Depend
 
 @app.post("/import/confirm")
 def import_confirm(
-    background_tasks: BackgroundTasks,
     urls: list[str] = Form(default=[]),
     user: User = Depends(get_current_user),
 ):
-    series_ids = []
     session = get_session()
     try:
         for url in urls:
             try:
-                series_ids.append(_subscribe_to_url(session, user, url))
+                _subscribe_to_url(session, user, url)
             except SeriesPageError as exc:
                 logger.warning("Import confirm: failed to add %r for user %s: %s", url, user.username, exc)
                 continue
     finally:
         session.close()
 
-    for series_id in series_ids:
-        background_tasks.add_task(refresh_series, series_id)
     return RedirectResponse("/", status_code=303)
 
 
