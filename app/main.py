@@ -676,12 +676,12 @@ def _subscribe_to_url(session, user: User, url: str) -> int:
         session.add(series)
         session.commit()
 
-    update_series_from_scraped(session, series, scraped)
-
     already_subscribed = session.query(Subscription).filter_by(user_id=user.id, series_id=series.id).first()
     if already_subscribed is None:
         session.add(Subscription(user_id=user.id, series_id=series.id))
         session.commit()
+
+    update_series_from_scraped(session, series, scraped)
 
     return series.id
 
