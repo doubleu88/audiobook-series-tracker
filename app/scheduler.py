@@ -10,7 +10,7 @@ from app.audiobookshelf import ABSClient, ABSError
 from app.db import get_session
 from app.models import Book, PushSubscription, Series, Subscription, User, UserBookStatus
 from app.push import send_push
-from app.scraper import SeriesPageError, fetch_series
+from app.scraper import ScrapedSeries, SeriesPageError, fetch_series
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +69,62 @@ def _notify_released_today(session, series: Series, released_books: list[Book]) 
     session.commit()
 
 
+def update_series_from_scraped(session, series: Series, scraped: ScrapedSeries) -> None:
+    series.consecutive_failures = 0
+    series.last_failure_at = None
+    series.last_failure_reason = None
+
+    today = datetime.date.today()
+    is_first_scrape = series.last_checked is None
+    existing_by_asin = {book.asin: book for book in series.books}
+    new_books: list[Book] = []
+    dated_books: list[Book] = []
+    released_today: list[Book] = []
+
+    for scraped_book in scraped.books:
+        book = existing_by_asin.get(scraped_book.asin)
+        if book is None:
+            book = Book(series_id=series.id, asin=scraped_book.asin)
+            session.add(book)
+            if is_first_scrape:
+                # Already out (today or earlier) at subscribe time — mark it as
+                # accounted for so it doesn't fire a stale "released today" the
+                # next time this series is refreshed.
+                if scraped_book.release_date is not None and scraped_book.release_date <= today:
+                    book.release_day_notified = True
+            elif scraped_book.release_date == today:
+                released_today.append(book)
+            else:
+                new_books.append(book)
+        elif not is_first_scrape and book.release_date is None and scraped_book.release_date is not None:
+            if scraped_book.release_date == today:
+                released_today.append(book)
+            else:
+                dated_books.append(book)
+        elif (
+            not is_first_scrape
+            and book.release_date == today
+            and scraped_book.release_date == today
+            and not book.release_day_notified
+        ):
+            released_today.append(book)
+
+        book.title = scraped_book.title
+        book.position = scraped_book.position
+        book.release_date = scraped_book.release_date
+        book.url = scraped_book.url
+        book.cover_image = scraped_book.image_url
+
+    series.name = scraped.name
+    series.last_checked = datetime.datetime.utcnow()
+    session.commit()
+
+    if new_books or dated_books:
+        _notify_new_and_dated(session, series, new_books, dated_books)
+    if released_today:
+        _notify_released_today(session, series, released_today)
+
+
 def refresh_series(series_id: int) -> None:
     session = get_session()
     try:
@@ -105,59 +161,7 @@ def refresh_series(series_id: int) -> None:
             session.commit()
             return
 
-        series.consecutive_failures = 0
-        series.last_failure_at = None
-        series.last_failure_reason = None
-
-        today = datetime.date.today()
-        is_first_scrape = series.last_checked is None
-        existing_by_asin = {book.asin: book for book in series.books}
-        new_books: list[Book] = []
-        dated_books: list[Book] = []
-        released_today: list[Book] = []
-
-        for scraped_book in scraped.books:
-            book = existing_by_asin.get(scraped_book.asin)
-            if book is None:
-                book = Book(series_id=series.id, asin=scraped_book.asin)
-                session.add(book)
-                if is_first_scrape:
-                    # Already out (today or earlier) at subscribe time — mark it as
-                    # accounted for so it doesn't fire a stale "released today" the
-                    # next time this series is refreshed.
-                    if scraped_book.release_date is not None and scraped_book.release_date <= today:
-                        book.release_day_notified = True
-                elif scraped_book.release_date == today:
-                    released_today.append(book)
-                else:
-                    new_books.append(book)
-            elif not is_first_scrape and book.release_date is None and scraped_book.release_date is not None:
-                if scraped_book.release_date == today:
-                    released_today.append(book)
-                else:
-                    dated_books.append(book)
-            elif (
-                not is_first_scrape
-                and book.release_date == today
-                and scraped_book.release_date == today
-                and not book.release_day_notified
-            ):
-                released_today.append(book)
-
-            book.title = scraped_book.title
-            book.position = scraped_book.position
-            book.release_date = scraped_book.release_date
-            book.url = scraped_book.url
-            book.cover_image = scraped_book.image_url
-
-        series.name = scraped.name
-        series.last_checked = datetime.datetime.utcnow()
-        session.commit()
-
-        if new_books or dated_books:
-            _notify_new_and_dated(session, series, new_books, dated_books)
-        if released_today:
-            _notify_released_today(session, series, released_today)
+        update_series_from_scraped(session, series, scraped)
     finally:
         session.close()
 
