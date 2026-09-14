@@ -5,6 +5,10 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.15.1] - 2026-09-14
+
+- Fix an annoyance where one adds a series (possibly after trying several times) but then has to try to load the books belonging to the series. It turns out the instant we have the series, we also have all of its books, so let's just parse them right away, so the user can Acknowledge or do something else with new books.
+
 ## [1.15.0] - 2026-09-10
 
 - Make Audiobookshelf integration (enabled under the user menu -> Integrations) more tolerant of huge or slow ABS server. Increased margin for error in scan startup timing (old scanner would fail if the scan was started 1 second too late, new timeout is 1 hour), add a "perform scan" button with a progress bar to Integrations page.
