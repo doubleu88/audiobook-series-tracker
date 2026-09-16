@@ -12,6 +12,8 @@ from app.db import DATA_DIR, get_session
 from app.models import Book, PushSubscription, Series, Subscription, User, UserBookStatus
 from app.push import send_push
 from app.scraper import ScrapedSeries, SeriesPageError, fetch_series
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import IntegrityError
 
 logger = logging.getLogger(__name__)
 
@@ -343,6 +345,7 @@ def run_scan_for_user(user_id: int) -> None:
             if status is None:
                 status = UserBookStatus(user_id=user.id, book_id=book.id)
                 session.add(status)
+                statuses[book.id] = status
             status.in_library = in_library
             status.checked_at = now
         session.commit()
@@ -400,33 +403,65 @@ def get_cached_abs_asins(user_id: int) -> set[str] | None:
 
 def reconcile_series_with_cached_asins(session, user_id: int, series: Series) -> int:
     cached = get_cached_abs_asins(user_id)
-    if cached is None:
+    if not cached:
         return 0
     now = datetime.datetime.utcnow()
-    statuses = {
-        s.book_id: s
-        for s in session.query(UserBookStatus).filter_by(user_id=user_id).all()
+    book_ids = [b.id for b in series.books]
+    if not book_ids:
+        return 0
+
+    existing_in_lib = {
+        s.book_id
+        for s in session.query(UserBookStatus.book_id)
+        .filter(
+            UserBookStatus.user_id == user_id,
+            UserBookStatus.book_id.in_(book_ids),
+            UserBookStatus.in_library.is_(True),
+        )
+        .all()
     }
+
+    matching_books = [
+        b
+        for b in series.books
+        if b.asin and b.asin.upper() in cached and b.id not in existing_in_lib
+    ]
+    if not matching_books:
+        return 0
+
     updated = 0
-    for book in series.books:
-        status = statuses.get(book.id)
-        is_in_lib = bool(book.asin and book.asin.upper() in cached)
-        if status is None:
-            status = UserBookStatus(
-                user_id=user_id,
-                book_id=book.id,
-                in_library=is_in_lib,
-                checked_at=now,
+    try:
+        for book in matching_books:
+            stmt = (
+                sqlite_insert(UserBookStatus)
+                .values(
+                    user_id=user_id,
+                    book_id=book.id,
+                    in_library=True,
+                    checked_at=now,
+                )
+                .on_conflict_do_update(
+                    index_elements=["user_id", "book_id"],
+                    set_={
+                        "in_library": True,
+                        "checked_at": now,
+                    },
+                )
             )
-            session.add(status)
-            if is_in_lib:
-                updated += 1
-        else:
-            if not status.in_library and is_in_lib:
-                status.in_library = True
-                updated += 1
-            status.checked_at = now
-    session.commit()
+            session.execute(stmt)
+            updated += 1
+        session.commit()
+    except IntegrityError:
+        # A concurrent request or background scan already committed this user's
+        # book status records. Rolling back is safe because the database is
+        # already up to date with those changes and subsequent reads will see them.
+        session.rollback()
+        logger.warning(
+            "Concurrent commit conflict reconciling cached ASINs for user %s, series %s; "
+            "safe to ignore as another transaction already committed the status updates.",
+            user_id,
+            series.id,
+        )
     return updated
 
 

@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from icalendar import Calendar, Event
 from pydantic import BaseModel
 from sqlalchemy import and_, func
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.audiobookshelf import ABSClient, ABSError
@@ -697,7 +698,15 @@ def _subscribe_to_url(session, user: User, url: str) -> int:
         session.commit()
 
     update_series_from_scraped(session, series, scraped)
-    reconcile_series_with_cached_asins(session, user.id, series)
+    try:
+        reconcile_series_with_cached_asins(session, user.id, series)
+    except Exception:
+        logger.warning(
+            "Non-fatal error reconciling series %s with cached ASINs on subscription; "
+            "subscription created successfully, ABS sync will retry on next scan",
+            series.id,
+            exc_info=True,
+        )
 
     return series.id
 
@@ -894,7 +903,15 @@ def series_detail(
         if series is None:
             raise HTTPException(status_code=404, detail="Series not found")
 
-        reconcile_series_with_cached_asins(session, user.id, series)
+        try:
+            reconcile_series_with_cached_asins(session, user.id, series)
+        except Exception:
+            logger.warning(
+                "Non-fatal error reconciling series %s with cached ASINs; "
+                "rendering series detail with existing library state",
+                series_id,
+                exc_info=True,
+            )
 
         today = datetime.date.today()
         books = list(series.books)
@@ -989,7 +1006,16 @@ def acknowledge_in_library(
         if series is None:
             raise HTTPException(status_code=404, detail="Series not found")
 
-        reconcile_series_with_cached_asins(session, user.id, series)
+        try:
+            reconcile_series_with_cached_asins(session, user.id, series)
+        except Exception:
+            logger.warning(
+                "Failed pre-reconciling series %s with cached ASINs before bulk acknowledge; "
+                "safe to proceed with acknowledging books already confirmed in library. "
+                "Any newly cached ASINs will reconcile on the next scan.",
+                series_id,
+                exc_info=True,
+            )
 
         now = datetime.datetime.utcnow()
         for book in series.books:
@@ -1064,10 +1090,13 @@ def download_book_grab(
         if not (db_user.prowlarr_base_url and db_user.prowlarr_api_key):
             return RedirectResponse("/account/integrations", status_code=303)
 
+        stmt = (
+            sqlite_insert(UserBookStatus)
+            .values(user_id=user.id, book_id=book.id)
+            .on_conflict_do_nothing(index_elements=["user_id", "book_id"])
+        )
+        session.execute(stmt)
         status = session.query(UserBookStatus).filter_by(user_id=user.id, book_id=book.id).first()
-        if status is None:
-            status = UserBookStatus(user_id=user.id, book_id=book.id)
-            session.add(status)
 
         try:
             ProwlarrClient(db_user.prowlarr_base_url, db_user.prowlarr_api_key).grab(guid, indexer_id)
@@ -1154,12 +1183,24 @@ def watchlist(request: Request, user: User = Depends(get_current_user)):
 
 
 def _acknowledge_book(session, user: User, book: Book) -> None:
-    status = session.query(UserBookStatus).filter_by(user_id=user.id, book_id=book.id).first()
-    if status is None:
-        status = UserBookStatus(user_id=user.id, book_id=book.id)
-        session.add(status)
-    status.acknowledged = True
-    status.acknowledged_at = datetime.datetime.utcnow()
+    now = datetime.datetime.utcnow()
+    stmt = (
+        sqlite_insert(UserBookStatus)
+        .values(
+            user_id=user.id,
+            book_id=book.id,
+            acknowledged=True,
+            acknowledged_at=now,
+        )
+        .on_conflict_do_update(
+            index_elements=["user_id", "book_id"],
+            set_={
+                "acknowledged": True,
+                "acknowledged_at": now,
+            },
+        )
+    )
+    session.execute(stmt)
 
 
 def _unacknowledge_book(session, user: User, book: Book) -> None:
