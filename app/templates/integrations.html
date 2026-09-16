@@ -1,7 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="block" style="margin-top: 1.5rem; max-width: 640px;">
-  <p><a href="/">&larr; Back to dashboard</a></p>
+  {% if return_to and return_to != '/' %}
+  <p class="meta-muted">
+    <a href="{{ return_to }}">&larr; Return to previous page</a>
+  </p>
+  {% endif %}
   <div class="section-head">
     <h2>🔗 Integrations</h2>
   </div>

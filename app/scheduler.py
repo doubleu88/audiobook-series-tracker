@@ -1,4 +1,5 @@
 import datetime
+import json
 import logging
 import threading
 import time
@@ -7,7 +8,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.audiobookshelf import ABSClient, ABSError
-from app.db import get_session
+from app.db import DATA_DIR, get_session
 from app.models import Book, PushSubscription, Series, Subscription, User, UserBookStatus
 from app.push import send_push
 from app.scraper import ScrapedSeries, SeriesPageError, fetch_series
@@ -286,6 +287,12 @@ def run_scan_for_user(user_id: int) -> None:
             return
 
         fetch_duration = time.time() - t0
+        try:
+            cache_file = DATA_DIR / f"abs_asins_{user_id}.json"
+            cache_file.write_text(json.dumps(list(asins)))
+        except Exception:
+            logger.exception("Failed to write ABS ASIN cache for user %s", user_id)
+
         logger.info(
             "Audiobookshelf scan for user '%s': fetched %d ASINs in %.1fs. Reconciling with subscribed books...",
             user.username,
@@ -379,6 +386,48 @@ def check_availability_for_user(user_id: int) -> None:
         logger.info("Audiobookshelf scan already in progress for user id %s; skipping", user_id)
         return
     run_scan_for_user(user_id)
+
+
+def get_cached_abs_asins(user_id: int) -> set[str] | None:
+    cache_file = DATA_DIR / f"abs_asins_{user_id}.json"
+    if cache_file.exists():
+        try:
+            return set(json.loads(cache_file.read_text()))
+        except Exception:
+            logger.warning("Failed to read ABS ASIN cache %s", cache_file)
+    return None
+
+
+def reconcile_series_with_cached_asins(session, user_id: int, series: Series) -> int:
+    cached = get_cached_abs_asins(user_id)
+    if cached is None:
+        return 0
+    now = datetime.datetime.utcnow()
+    statuses = {
+        s.book_id: s
+        for s in session.query(UserBookStatus).filter_by(user_id=user_id).all()
+    }
+    updated = 0
+    for book in series.books:
+        status = statuses.get(book.id)
+        is_in_lib = bool(book.asin and book.asin.upper() in cached)
+        if status is None:
+            status = UserBookStatus(
+                user_id=user_id,
+                book_id=book.id,
+                in_library=is_in_lib,
+                checked_at=now,
+            )
+            session.add(status)
+            if is_in_lib:
+                updated += 1
+        else:
+            if not status.in_library and is_in_lib:
+                status.in_library = True
+                updated += 1
+            status.checked_at = now
+    session.commit()
+    return updated
 
 
 def check_availability_all_users() -> None:

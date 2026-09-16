@@ -7,7 +7,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-TIMEOUT = 45.0
+TIMEOUT = 90.0
 PAGE_SIZE = 500
 
 

@@ -1,6 +1,37 @@
 {% extends "base.html" %}
 {% block content %}
 
+{% if impacted_row %}
+<section class="block" id="impacted-series-box" style="border: 1px solid var(--accent); background: var(--surface); margin-bottom: 1.5rem;">
+  <div class="section-head" style="margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
+    <h2 style="font-size: 1.05rem; color: var(--accent); margin: 0;">
+      ⚡ Recently viewed series
+    </h2>
+    <a href="/series/{{ impacted_row.series.id }}" class="btn btn-sm">Open series &rarr;</a>
+  </div>
+  <div class="series-table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th></th>
+        <th>Series</th>
+        <th>Status</th>
+        <th>#watching</th>
+        <th>Latest released</th>
+        <th>Next book</th>
+        <th>Last checked</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set row = impacted_row %}
+      {% include "_series_row.html" %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
 <section class="block">
   <div class="section-head">
     <h2>🆕 Recently released</h2>
@@ -33,7 +64,7 @@
       </a>
       <div class="body">
         <p class="title">{{ entry.book.title }}</p>
-        <p class="series-name">{{ entry.series.name }}</p>
+        <p class="series-name"><a href="/series/{{ entry.series.id }}">{{ entry.series.name }}</a></p>
         <div class="badge-stack">
           <span class="badge badge-ongoing">{{ entry.relative }}</span>
           {% if abs_connected %}
@@ -82,7 +113,7 @@
       </a>
       <div class="body">
         <p class="title">{{ entry.book.title }}</p>
-        <p class="series-name">{{ entry.series.name }}</p>
+        <p class="series-name"><a href="/series/{{ entry.series.id }}">{{ entry.series.name }}</a></p>
         <div class="badge-stack">
           <span class="badge badge-date">{{ entry.relative }}</span>
           <span class="date-sub">{{ entry.book.release_date }}</span>
@@ -117,74 +148,7 @@
     </thead>
     <tbody>
       {% for row in rows %}
-      <tr data-series-name="{{ row.series.name|lower }}">
-        <td>
-          {% if row.cover %}
-            <img class="cover-sm" src="{{ row.cover }}" alt="">
-          {% else %}
-            <div class="cover-sm-placeholder">📖</div>
-          {% endif %}
-        </td>
-        <td class="series-name-cell">
-          <a href="{{ row.series.url }}" target="_blank" rel="noopener">{{ row.series.name }}</a>
-          {% if row.muted %}<span title="Notifications muted">🔇</span>{% endif %}
-        </td>
-        <td>
-          {% if row.series.ended %}
-            <span class="badge badge-ended">Ended</span>
-          {% else %}
-            <span class="badge badge-ongoing">Ongoing</span>
-          {% endif %}
-        </td>
-        <td>
-          <a href="/watchlist?series_id={{ row.series.id }}">{{ row.watchlist_count }} / {{ row.released_count }}</a>
-        </td>
-        <td>
-          {% if row.latest_released %}
-            {{ row.latest_released.title }}
-            {% if row.latest_released.release_date %}<br><span class="meta-muted">{{ row.latest_released.release_date }}</span>{% endif %}
-          {% else %}
-            <span class="meta-muted">&mdash;</span>
-          {% endif %}
-        </td>
-        <td>
-          {% if row.series.ended %}
-            <span class="meta-muted">&mdash;</span>
-          {% elif row.upcoming %}
-            {{ row.upcoming.title }}
-            {% if row.upcoming.release_date %}
-              <br><span class="badge badge-date">{{ row.upcoming.release_date }}</span>
-            {% else %}
-              <br><span class="badge badge-unknown">Date TBD</span>
-            {% endif %}
-          {% else %}
-            <span class="badge badge-unknown">No announced book</span>
-          {% endif %}
-        </td>
-        <td class="meta-muted">
-          {{ row.series.last_checked.strftime("%Y-%m-%d") if row.series.last_checked else "never" }}
-          {% if row.series.consecutive_failures > 0 %}
-            <br><span class="badge badge-unknown" title="{{ row.series.last_failure_reason }}">⚠️ {{ row.series.consecutive_failures }} failed check{{ "s" if row.series.consecutive_failures != 1 else "" }}</span>
-          {% endif %}
-        </td>
-        <td>
-          <div class="row-actions">
-            <form class="inline" method="post" action="/series/{{ row.series.id }}/refresh">
-              <button class="link" type="submit">Refresh</button>
-            </form>
-            <form class="inline" method="post" action="/series/{{ row.series.id }}/toggle-ended">
-              <button class="link" type="submit">{{ "Mark ongoing" if row.series.ended else "Mark ended" }}</button>
-            </form>
-            <form class="inline" method="post" action="/series/{{ row.series.id }}/toggle-mute">
-              <button class="link" type="submit">{{ "Unmute" if row.muted else "Mute" }}</button>
-            </form>
-            <form class="inline" method="post" action="/series/{{ row.series.id }}/unsubscribe"
-                  onsubmit="return confirm('Unsubscribe from {{ row.series.name }}?');">
-              <button class="link" type="submit">Unsubscribe</button>
-            </form>
-          </div>
-        </td>
-      </tr>
+      {% include "_series_row.html" %}
       {% endfor %}
     </tbody>
   </table>

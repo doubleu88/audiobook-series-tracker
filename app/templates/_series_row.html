@@ -1,0 +1,68 @@
+<tr data-series-name="{{ row.series.name|lower }}">
+  <td>
+    {% if row.cover %}
+      <img class="cover-sm" src="{{ row.cover }}" alt="">
+    {% else %}
+      <div class="cover-sm-placeholder">📖</div>
+    {% endif %}
+  </td>
+  <td class="series-name-cell">
+    <a href="{{ row.series.url }}" target="_blank" rel="noopener">{{ row.series.name }}</a>
+    {% if row.muted %}<span title="Notifications muted">🔇</span>{% endif %}
+  </td>
+  <td>
+    {% if row.series.ended %}
+      <span class="badge badge-ended">Ended</span>
+    {% else %}
+      <span class="badge badge-ongoing">Ongoing</span>
+    {% endif %}
+  </td>
+  <td>
+    <a href="/series/{{ row.series.id }}" title="View series books">{{ row.watchlist_count }} / {{ row.released_count }}</a>
+  </td>
+  <td>
+    {% if row.latest_released %}
+      {{ row.latest_released.title }}
+      {% if row.latest_released.release_date %}<br><span class="meta-muted">{{ row.latest_released.release_date }}</span>{% endif %}
+    {% else %}
+      <span class="meta-muted">&mdash;</span>
+    {% endif %}
+  </td>
+  <td>
+    {% if row.series.ended %}
+      <span class="meta-muted">&mdash;</span>
+    {% elif row.upcoming %}
+      {{ row.upcoming.title }}
+      {% if row.upcoming.release_date %}
+        <br><span class="badge badge-date">{{ row.upcoming.release_date }}</span>
+      {% else %}
+        <br><span class="badge badge-unknown">Date TBD</span>
+      {% endif %}
+    {% else %}
+      <span class="badge badge-unknown">No announced book</span>
+    {% endif %}
+  </td>
+  <td class="meta-muted">
+    {{ row.series.last_checked.strftime("%Y-%m-%d") if row.series.last_checked else "never" }}
+    {% if row.series.consecutive_failures > 0 %}
+      <br><span class="badge badge-unknown" title="{{ row.series.last_failure_reason }}">⚠️ {{ row.series.consecutive_failures }} failed check{{ "s" if row.series.consecutive_failures != 1 else "" }}</span>
+    {% endif %}
+  </td>
+  <td>
+    <div class="row-actions">
+      <form class="inline" method="post" action="/series/{{ row.series.id }}/refresh">
+        <button class="link" type="submit">Refresh</button>
+      </form>
+      <form class="inline" method="post" action="/series/{{ row.series.id }}/toggle-ended">
+        <button class="link" type="submit">{{ "Mark ongoing" if row.series.ended else "Mark ended" }}</button>
+      </form>
+      <form class="inline" method="post" action="/series/{{ row.series.id }}/toggle-mute">
+        <button class="link" type="submit">{{ "Unmute" if row.muted else "Mute" }}</button>
+      </form>
+      <form class="inline" method="post" action="/series/{{ row.series.id }}/unsubscribe"
+            onsubmit="return confirm('Unsubscribe from {{ row.series.name }}?');">
+        <button class="link" type="submit">Unsubscribe</button>
+      </form>
+    </div>
+  </td>
+</tr>

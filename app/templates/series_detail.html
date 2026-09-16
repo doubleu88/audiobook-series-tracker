@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="block" style="margin-top: 1.5rem;">
+  <div class="section-head" style="align-items: flex-start; gap: 1.25rem;">
+    <div style="display: flex; gap: 1rem; align-items: flex-start; flex-wrap: wrap;">
+      {% if series_cover %}
+        <img class="cover-sm" src="{{ series_cover }}" alt="" style="width: 64px; height: 64px; border-radius: var(--radius-sm); object-fit: cover;">
+      {% else %}
+        <div class="cover-sm-placeholder" style="width: 64px; height: 64px; font-size: 1.8rem;">📖</div>
+      {% endif %}
+      <div>
+        <h2 style="margin: 0; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+          {{ series.name }}
+          {% if series.ended %}
+            <span class="badge badge-ended">Ended</span>
+          {% else %}
+            <span class="badge badge-ongoing">Ongoing</span>
+          {% endif %}
+          {% if subscription.muted %}
+            <span class="badge badge-unknown" title="Notifications muted">🔇 Muted</span>
+          {% endif %}
+          <a href="{{ series.url }}" target="_blank" rel="noopener" style="font-size: 0.85rem; font-weight: normal; margin-left: 0.25rem;" title="View on Audible">Audible ↗</a>
+        </h2>
+        <p class="meta-muted" style="margin: 0.35rem 0 0; font-size: 0.85rem;">
+          {{ released_count }} released &middot; {{ books|length }} total book{{ "s" if books|length != 1 else "" }} &middot;
+          {{ watchlist_count }} <a href="/watchlist">watchlisted</a>
+        </p>
+        <div class="meta-muted" style="margin-top: 0.35rem; display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; font-size: 0.85rem;">
+          <span>Last refreshed from Audible: {{ series.last_checked.strftime("%Y-%m-%d") if series.last_checked else "never" }}</span>
+          {% if series.consecutive_failures > 0 %}
+            <span class="badge badge-unknown" title="{{ series.last_failure_reason }}">⚠️ {{ series.consecutive_failures }} failed check{{ "s" if series.consecutive_failures != 1 else "" }}</span>
+          {% endif %}
+          <span>&middot;</span>
+          <form class="inline" method="post" action="/series/{{ series.id }}/refresh" style="display: inline-flex; align-items: center;">
+            <button class="link" type="submit" style="font-size: 0.85rem; color: var(--accent);">Refresh Audible</button>
+          </form>
+        </div>
+        {% if abs_connected %}
+        <div class="meta-muted" id="abs-series-status-wrap"
+             data-last-scanned="{{ abs_last_scanned_at.strftime('%Y-%m-%d %H:%M UTC') if abs_last_scanned_at else '' }}"
+             data-scanning="{{ 'true' if abs_scanning else 'false' }}"
+             style="margin-top: 0.35rem; display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; font-size: 0.85rem;">
+          <span id="abs-series-last-scanned-text">Last refreshed from Audiobookshelf: {{ abs_last_scanned_at.strftime("%Y-%m-%d") if abs_last_scanned_at else "never" }}</span>
+          <span>&middot;</span>
+          <span id="abs-series-action-wrap">
+            {% if abs_scanning %}
+            <a href="/account/integrations?return_to=/series/{{ series.id }}">⏳ ABS scanning...</a>
+            {% else %}
+            <a href="/account/integrations?return_to=/series/{{ series.id }}" style="display: inline-flex; align-items: center; gap: 0.25rem;">
+              Update <span class="badge badge-library" style="vertical-align: middle;">✅ In library</span> &rarr;
+            </a>
+            {% endif %}
+          </span>
+        </div>
+        {% else %}
+        <div class="meta-muted" style="margin-top: 0.35rem; display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; font-size: 0.85rem;">
+          <span>Audiobookshelf: Not connected</span>
+          <span>&middot;</span>
+          <a href="/account/integrations?return_to=/series/{{ series.id }}">Connect in Integrations &rarr;</a>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin-top: 1.25rem; padding-top: 0.85rem; border-top: 1px solid var(--border);">
+    {% if abs_connected and in_library_unack_count > 0 %}
+    <form method="post" action="/series/{{ series.id }}/acknowledge-in-library" class="inline">
+      <button class="btn" type="submit">
+        Acknowledge <span class="badge badge-library" style="margin: 0 0.35rem; vertical-align: middle;">✅ In library</span> books ({{ in_library_unack_count }})
+      </button>
+    </form>
+    {% elif abs_connected %}
+    <button class="btn" disabled style="opacity: 0.5; cursor: not-allowed;">
+      All <span class="badge badge-library" style="margin: 0 0.35rem; vertical-align: middle;">✅ In library</span> books acknowledged
+    </button>
+    {% endif %}
+
+    <form class="inline" method="post" action="/series/{{ series.id }}/toggle-ended">
+      <button class="link" type="submit">{{ "Mark ongoing" if series.ended else "Mark ended" }}</button>
+    </form>
+    <form class="inline" method="post" action="/series/{{ series.id }}/toggle-mute">
+      <button class="link" type="submit">{{ "Unmute" if subscription.muted else "Mute" }}</button>
+    </form>
+    <form class="inline" method="post" action="/series/{{ series.id }}/unsubscribe" onsubmit="return confirm('Unsubscribe from {{ series.name }}?');">
+      <button class="link" type="submit">Unsubscribe</button>
+    </form>
+  </div>
+
+  {% if books %}
+  <div class="series-table-wrap" style="margin-top: 1.5rem;">
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 48px;"></th>
+          <th style="width: 50px;">#</th>
+          <th>Book</th>
+          <th class="cell-nowrap" style="width: 150px;">Release Date</th>
+          {% if abs_connected %}
+          <th class="cell-nowrap" style="width: 130px;">In Library</th>
+          {% endif %}
+          <th class="cell-nowrap" style="width: 140px;">Watchlist Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in book_entries %}
+        <tr class="{{ 'row-acknowledged' if entry.status and entry.status.acknowledged else '' }}">
+          <td>
+            {% if entry.book.cover_image %}
+              <img class="cover-sm" src="{{ entry.book.cover_image }}" alt="">
+            {% else %}
+              <div class="cover-sm-placeholder">📖</div>
+            {% endif %}
+          </td>
+          <td class="meta-muted" style="font-weight: 600;">
+            {% if entry.book.position is not none %}
+              {{ entry.book.position|int if entry.book.position == entry.book.position|int else entry.book.position }}
+            {% else %}
+              &mdash;
+            {% endif %}
+          </td>
+          <td>
+            <a href="{{ entry.book.url }}" target="_blank" rel="noopener">{{ entry.book.title }}</a>
+          </td>
+          <td class="cell-nowrap">
+            {% if entry.book.release_date %}
+              <span class="{{ 'badge badge-date' if not entry.book.released else '' }}">{{ entry.book.release_date }}</span>
+              <br><span class="meta-muted" style="font-size: 0.8rem;">{{ entry.relative }}</span>
+            {% else %}
+              <span class="badge badge-unknown">Date TBD</span>
+            {% endif %}
+          </td>
+          {% if abs_connected %}
+          <td class="cell-nowrap">
+            {% if entry.status and entry.status.in_library %}
+              <span class="badge badge-library">✅ In library</span>
+            {% elif not entry.book.released %}
+              <span class="meta-muted">&mdash;</span>
+            {% elif entry.status and entry.status.checked_at is not none %}
+              <span class="badge badge-unknown">Not in library</span>
+              {% if prowlarr_connected %}
+                <a class="btn btn-sm" href="/books/{{ entry.book.id }}/download" style="margin-left: 0.25rem;">⬇️</a>
+              {% endif %}
+            {% else %}
+              <span class="badge badge-unknown" title="Hasn't been checked against your Audiobookshelf library yet">Not checked yet</span>
+            {% endif %}
+          </td>
+          {% endif %}
+          <td class="cell-nowrap">
+            {% if entry.status and entry.status.acknowledged %}
+              <form method="post" action="/books/{{ entry.book.id }}/unacknowledge" class="inline">
+                <input type="hidden" name="return_to" value="/series/{{ series.id }}">
+                <button class="link" type="submit" title="Return to active watchlist">Watch</button>
+              </form>
+            {% elif entry.book.released %}
+              <form method="post" action="/books/{{ entry.book.id }}/acknowledge" class="inline">
+                <input type="hidden" name="return_to" value="/series/{{ series.id }}">
+                <button class="link" type="submit">Acknowledge</button>
+              </form>
+            {% else %}
+              <span class="meta-muted">&mdash;</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty-hint" style="margin-top: 1.5rem;">No books found for this series yet.</p>
+  {% endif %}
+</section>
+{% endblock %}
