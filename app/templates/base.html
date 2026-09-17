@@ -431,6 +431,14 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
+    .card .series-name a {
+      color: var(--text-muted);
+      text-decoration: none;
+    }
+    .card .series-name a:hover {
+      color: var(--accent);
+      text-decoration: underline;
+    }
     .card .badge-stack {
       margin-top: auto;
       display: flex;
@@ -578,6 +586,14 @@
     :root[data-theme="light"] .btn { color: #ffffff; }
     @media (prefers-color-scheme: light) { .btn { color: #ffffff; } }
     :root[data-theme="dark"] .btn { color: #0b0d10; }
+    .btn .badge-library {
+      background: rgba(0, 0, 0, 0.25);
+      color: currentColor;
+      font-weight: 700;
+    }
+    a.btn:hover { color: inherit; }
+    :root[data-theme="dark"] a.btn:hover { color: #0b0d10; }
+    :root[data-theme="light"] a.btn:hover { color: #ffffff; }
 
     /* ---------- Responsive ---------- */
     @media (max-width: 720px) {
@@ -638,7 +654,12 @@
           <div class="menu-divider"></div>
           <a class="menu-item" href="/account/password">🔑 Change password</a>
           <a class="menu-item" href="/account/export.csv">📊 Export my series</a>
-          <a class="menu-item" href="/account/integrations">🔗 Integrations</a>
+          {% if request and request.url.path != '/account/integrations' %}
+            {% set current_loc = request.url.path ~ ('?' ~ request.url.query if request.url.query else '') %}
+            <a class="menu-item" id="integrations-menu-link" href="/account/integrations?return_to={{ current_loc | urlencode }}">🔗 Integrations</a>
+          {% else %}
+            <a class="menu-item" id="integrations-menu-link" href="/account/integrations">🔗 Integrations</a>
+          {% endif %}
           {% if user.is_admin %}
           <div class="menu-divider"></div>
           <a class="menu-item" href="/admin/users">🛠️ Manage users</a>

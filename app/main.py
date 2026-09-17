@@ -4,6 +4,7 @@ import io
 import logging
 import secrets
 import time
+from urllib.parse import urlparse
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -12,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from icalendar import Calendar, Event
 from pydantic import BaseModel
 from sqlalchemy import and_, func
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.audiobookshelf import ABSClient, ABSError
@@ -32,6 +34,7 @@ from app.scheduler import (
     get_user_scan_progress,
     is_user_scanning,
     mark_user_scanning,
+    reconcile_series_with_cached_asins,
     refresh_series,
     run_scan_for_user,
     start_scheduler,
@@ -318,6 +321,16 @@ def regenerate_calendar_token(request: Request, user: User = Depends(get_current
     return RedirectResponse(request.headers.get("referer") or "/", status_code=303)
 
 
+def _safe_return_to(url: str | None, default: str | None = None) -> str | None:
+    """Ensures return_to is a safe same-origin path, preventing open redirects and script injection."""
+    if not url:
+        return default
+    url = url.strip()
+    if url.startswith("/") and not url.startswith("//") and not url.startswith("/\\"):
+        return url
+    return default
+
+
 def _json_or_redirect(
     request: Request,
     payload: dict,
@@ -326,7 +339,8 @@ def _json_or_redirect(
 ) -> Response:
     if request.headers.get("accept") == "application/json":
         return JSONResponse(payload, status_code=status_code)
-    return RedirectResponse(redirect_url, status_code=303)
+    safe_url = _safe_return_to(redirect_url, default="/") or "/"
+    return RedirectResponse(safe_url, status_code=303)
 
 
 def _integrations_context(request: Request, user: User, session, abs_error: str | None = None, prowlarr_error: str | None = None) -> dict:
@@ -368,10 +382,16 @@ def _integrations_context(request: Request, user: User, session, abs_error: str 
 
 
 @app.get("/account/integrations", response_class=HTMLResponse)
-def integrations_form(request: Request, user: User = Depends(get_current_user)):
+def integrations_form(
+    request: Request,
+    return_to: str | None = None,
+    user: User = Depends(get_current_user),
+):
     session = get_session()
     try:
         context = _integrations_context(request, user, session)
+        raw_return_to = return_to or request.query_params.get("return_to")
+        context["return_to"] = _safe_return_to(raw_return_to, default=None)
     finally:
         session.close()
     return templates.TemplateResponse("integrations.html", context)
@@ -610,12 +630,16 @@ def dashboard(
             for entry in recent_books:
                 entry["status"] = statuses.get(entry["book"].id)
 
+        impacted_series_id = request.session.pop("impacted_series_id", None)
+        impacted_row = next((r for r in rows if r["series"].id == impacted_series_id), None) if impacted_series_id else None
+
         return templates.TemplateResponse(
             "dashboard.html",
             {
                 "request": request,
                 "user": user,
                 "rows": rows,
+                "impacted_row": impacted_row,
                 "recent_books": recent_books,
                 "upcoming_books": upcoming_books,
                 "recent_months": recent_months,
@@ -664,6 +688,10 @@ def search_form(request: Request, q: str | None = None, user: User = Depends(get
     )
 
 
+def _set_impacted_series(request: Request, series_id: int) -> None:
+    request.session["impacted_series_id"] = series_id
+
+
 def _subscribe_to_url(session, user: User, url: str) -> int:
     """Finds-or-creates the Series for this URL and ensures a Subscription for
     this user, returning the series id. Raises SeriesPageError if the URL
@@ -682,6 +710,15 @@ def _subscribe_to_url(session, user: User, url: str) -> int:
         session.commit()
 
     update_series_from_scraped(session, series, scraped)
+    try:
+        reconcile_series_with_cached_asins(session, user.id, series)
+    except Exception:
+        logger.warning(
+            "Non-fatal error reconciling series %s with cached ASINs on subscription; "
+            "subscription created successfully, ABS sync will retry on next scan",
+            series.id,
+            exc_info=True,
+        )
 
     return series.id
 
@@ -700,7 +737,8 @@ def add_series(
     session = get_session()
     try:
         try:
-            _subscribe_to_url(session, user, url)
+            series_id = _subscribe_to_url(session, user, url)
+            _set_impacted_series(request, series_id)
         except SeriesPageError as exc:
             logger.warning("Failed to add series from %r for user %s: %s", url, user.username, exc)
             return templates.TemplateResponse(
@@ -765,17 +803,21 @@ def import_preview(request: Request, lines: str = Form(...), user: User = Depend
 
 @app.post("/import/confirm")
 def import_confirm(
+    request: Request,
     urls: list[str] = Form(default=[]),
     user: User = Depends(get_current_user),
 ):
     session = get_session()
+    last_id = None
     try:
         for url in urls:
             try:
-                _subscribe_to_url(session, user, url)
+                last_id = _subscribe_to_url(session, user, url)
             except SeriesPageError as exc:
                 logger.warning("Import confirm: failed to add %r for user %s: %s", url, user.username, exc)
                 continue
+        if last_id is not None:
+            _set_impacted_series(request, last_id)
     finally:
         session.close()
 
@@ -786,50 +828,64 @@ def _require_subscription(session, user: User, series_id: int) -> Subscription |
     return session.query(Subscription).filter_by(user_id=user.id, series_id=series_id).first()
 
 
-@app.post("/series/{series_id}/refresh")
-def refresh_one(series_id: int, user: User = Depends(get_current_user)):
-    session = get_session()
-    try:
-        if _require_subscription(session, user, series_id) is None:
-            return RedirectResponse("/", status_code=303)
-    finally:
-        session.close()
-    refresh_series(series_id)
+def _redirect_series_or_dash(request: Request, series_id: int) -> RedirectResponse:
+    referer = request.headers.get("referer", "")
+    if referer:
+        path = urlparse(referer).path.rstrip("/")
+        if path == f"/series/{series_id}":
+            return RedirectResponse(f"/series/{series_id}", status_code=303)
     return RedirectResponse("/", status_code=303)
 
 
-@app.post("/series/{series_id}/toggle-ended")
-def toggle_ended(series_id: int, user: User = Depends(get_current_user)):
+@app.post("/series/{series_id}/refresh")
+def refresh_one(request: Request, series_id: int, user: User = Depends(get_current_user)):
     session = get_session()
     try:
         if _require_subscription(session, user, series_id) is None:
-            return RedirectResponse("/", status_code=303)
+            return _redirect_series_or_dash(request, series_id)
+    finally:
+        session.close()
+    refresh_series(series_id)
+    _set_impacted_series(request, series_id)
+    return _redirect_series_or_dash(request, series_id)
+
+
+@app.post("/series/{series_id}/toggle-ended")
+def toggle_ended(request: Request, series_id: int, user: User = Depends(get_current_user)):
+    session = get_session()
+    try:
+        if _require_subscription(session, user, series_id) is None:
+            return _redirect_series_or_dash(request, series_id)
         series = session.get(Series, series_id)
         if series is not None:
             series.ended = not series.ended
             session.commit()
+            _set_impacted_series(request, series_id)
     finally:
         session.close()
-    return RedirectResponse("/", status_code=303)
+    return _redirect_series_or_dash(request, series_id)
 
 
 @app.post("/series/{series_id}/toggle-mute")
-def toggle_mute(series_id: int, user: User = Depends(get_current_user)):
+def toggle_mute(request: Request, series_id: int, user: User = Depends(get_current_user)):
     session = get_session()
     try:
         subscription = _require_subscription(session, user, series_id)
         if subscription is not None:
             subscription.muted = not subscription.muted
             session.commit()
+            _set_impacted_series(request, series_id)
     finally:
         session.close()
-    return RedirectResponse("/", status_code=303)
+    return _redirect_series_or_dash(request, series_id)
 
 
 @app.post("/series/{series_id}/unsubscribe")
-def unsubscribe(series_id: int, user: User = Depends(get_current_user)):
+def unsubscribe(request: Request, series_id: int, user: User = Depends(get_current_user)):
     session = get_session()
     try:
+        if request.session.get("impacted_series_id") == series_id:
+            request.session.pop("impacted_series_id", None)
         subscription = _require_subscription(session, user, series_id)
         if subscription is not None:
             session.delete(subscription)
@@ -844,6 +900,151 @@ def unsubscribe(series_id: int, user: User = Depends(get_current_user)):
     finally:
         session.close()
     return RedirectResponse("/", status_code=303)
+
+
+@app.get("/series/{series_id}", response_class=HTMLResponse)
+def series_detail(
+    request: Request,
+    series_id: int,
+    user: User = Depends(get_current_user),
+):
+    session = get_session()
+    try:
+        sub = _require_subscription(session, user, series_id)
+        if sub is None:
+            raise HTTPException(status_code=404, detail="Series not found or not subscribed")
+        series = session.get(Series, series_id)
+        if series is None:
+            raise HTTPException(status_code=404, detail="Series not found")
+
+        try:
+            reconcile_series_with_cached_asins(session, user.id, series)
+        except Exception:
+            logger.warning(
+                "Non-fatal error reconciling series %s with cached ASINs; "
+                "rendering series detail with existing library state",
+                series_id,
+                exc_info=True,
+            )
+
+        today = datetime.date.today()
+        books = list(series.books)
+        books.sort(
+            key=lambda b: (
+                b.position is None,
+                b.position if b.position is not None else 0,
+                b.release_date or datetime.date.max,
+            )
+        )
+
+        statuses = {
+            s.book_id: s
+            for s in session.query(UserBookStatus).filter_by(user_id=user.id).all()
+        }
+
+        db_user = session.get(User, user.id)
+        abs_connected = bool(db_user.abs_base_url and db_user.abs_library_id)
+        prowlarr_connected = bool(db_user.prowlarr_base_url and db_user.prowlarr_api_key)
+
+        book_entries = []
+        released_count = 0
+        watchlist_count = 0
+        in_library_unack_count = 0
+
+        for b in books:
+            st = statuses.get(b.id)
+            if b.released:
+                released_count += 1
+                if not (st and st.acknowledged):
+                    watchlist_count += 1
+            if st and st.in_library and not st.acknowledged and b.released:
+                in_library_unack_count += 1
+
+            rel = ""
+            if b.release_date:
+                diff_days = (b.release_date - today).days
+                rel = humanize_relative(diff_days)
+
+            book_entries.append(
+                {
+                    "book": b,
+                    "status": st,
+                    "relative": rel,
+                }
+            )
+
+        series_cover = next((b.cover_image for b in books if b.cover_image), None)
+        _set_impacted_series(request, series.id)
+
+        abs_last_scanned_at = (
+            session.query(func.max(UserBookStatus.checked_at))
+            .filter(UserBookStatus.user_id == user.id)
+            .scalar()
+        )
+
+        return templates.TemplateResponse(
+            "series_detail.html",
+            {
+                "request": request,
+                "user": user,
+                "series": series,
+                "subscription": sub,
+                "books": books,
+                "book_entries": book_entries,
+                "series_cover": series_cover,
+                "released_count": released_count,
+                "watchlist_count": watchlist_count,
+                "in_library_unack_count": in_library_unack_count,
+                "abs_connected": abs_connected,
+                "abs_scanning": is_user_scanning(user.id),
+                "abs_last_scanned_at": abs_last_scanned_at,
+                "prowlarr_connected": prowlarr_connected,
+            },
+        )
+    finally:
+        session.close()
+
+
+@app.post("/series/{series_id}/acknowledge-in-library")
+def acknowledge_in_library(
+    request: Request,
+    series_id: int,
+    user: User = Depends(get_current_user),
+):
+    session = get_session()
+    try:
+        sub = _require_subscription(session, user, series_id)
+        if sub is None:
+            raise HTTPException(status_code=404, detail="Series not found")
+        series = session.get(Series, series_id)
+        if series is None:
+            raise HTTPException(status_code=404, detail="Series not found")
+
+        try:
+            reconcile_series_with_cached_asins(session, user.id, series)
+        except Exception:
+            logger.warning(
+                "Failed pre-reconciling series %s with cached ASINs before bulk acknowledge; "
+                "safe to proceed with acknowledging books already confirmed in library. "
+                "Any newly cached ASINs will reconcile on the next scan.",
+                series_id,
+                exc_info=True,
+            )
+
+        now = datetime.datetime.utcnow()
+        for book in series.books:
+            if not book.released:
+                continue
+            status = session.query(UserBookStatus).filter_by(user_id=user.id, book_id=book.id).first()
+            if status is not None and status.in_library and not status.acknowledged:
+                status.acknowledged = True
+                status.acknowledged_at = now
+        session.commit()
+        _set_impacted_series(request, series_id)
+    finally:
+        session.close()
+
+    return RedirectResponse(f"/series/{series_id}", status_code=303)
 
 
 def _require_subscription_for_book(session, user: User, book_id: int) -> Book | None:
@@ -903,10 +1104,13 @@ def download_book_grab(
         if not (db_user.prowlarr_base_url and db_user.prowlarr_api_key):
             return RedirectResponse("/account/integrations", status_code=303)
 
+        stmt = (
+            sqlite_insert(UserBookStatus)
+            .values(user_id=user.id, book_id=book.id)
+            .on_conflict_do_nothing(index_elements=["user_id", "book_id"])
+        )
+        session.execute(stmt)
         status = session.query(UserBookStatus).filter_by(user_id=user.id, book_id=book.id).first()
-        if status is None:
-            status = UserBookStatus(user_id=user.id, book_id=book.id)
-            session.add(status)
 
         try:
             ProwlarrClient(db_user.prowlarr_base_url, db_user.prowlarr_api_key).grab(guid, indexer_id)
@@ -924,13 +1128,11 @@ def download_book_grab(
 def _watchlist_query(
     session,
     user: User,
-    series_id: int | None = None,
     unacknowledged_only: bool = True,
     include_status: bool = False,
 ):
     """Released books in the user's non-muted subscriptions. If unacknowledged_only
-    is True, excludes books with an acknowledged UserBookStatus row. Optionally
-    scoped to a single series, for the per-series view/bulk-acknowledge."""
+    is True, excludes books with an acknowledged UserBookStatus row."""
     entities = (Book, Series, UserBookStatus) if include_status else (Book, Series)
     query = (
         session.query(*entities)
@@ -958,17 +1160,19 @@ def _watchlist_query(
             .subquery()
         )
         query = query.filter(Book.id.notin_(acknowledged_book_ids))
-    if series_id is not None:
-        query = query.filter(Series.id == series_id)
     return query.order_by(Book.release_date.asc(), Series.name.asc(), Book.position.asc(), Book.id.asc())
 
 
 @app.get("/watchlist", response_class=HTMLResponse)
-def watchlist(request: Request, series_id: int | None = None, user: User = Depends(get_current_user)):
+def watchlist(request: Request, user: User = Depends(get_current_user)):
+    series_id_param = request.query_params.get("series_id")
+    if series_id_param and series_id_param.isdigit():
+        return RedirectResponse(f"/series/{series_id_param}", status_code=302)
+
     session = get_session()
     try:
         rows = _watchlist_query(
-            session, user, series_id=series_id, unacknowledged_only=False, include_status=True
+            session, user, unacknowledged_only=False, include_status=True
         ).all()
         entries = [
             {
@@ -982,14 +1186,6 @@ def watchlist(request: Request, series_id: int | None = None, user: User = Depen
         ]
         unacknowledged_count = sum(1 for e in entries if not e["acknowledged"])
         abs_connected = bool(user.abs_base_url and user.abs_library_id)
-        filtered_series = None
-        if series_id is not None:
-            filtered_series = entries[0]["series"] if entries else (
-                session.query(Series)
-                .join(Subscription)
-                .filter(Series.id == series_id, Subscription.user_id == user.id)
-                .first()
-            )
         return templates.TemplateResponse(
             "watchlist.html",
             {
@@ -997,7 +1193,6 @@ def watchlist(request: Request, series_id: int | None = None, user: User = Depen
                 "user": user,
                 "entries": entries,
                 "unacknowledged_count": unacknowledged_count,
-                "filtered_series": filtered_series,
                 "abs_connected": abs_connected,
             },
         )
@@ -1006,12 +1201,24 @@ def watchlist(request: Request, series_id: int | None = None, user: User = Depen
 
 
 def _acknowledge_book(session, user: User, book: Book) -> None:
-    status = session.query(UserBookStatus).filter_by(user_id=user.id, book_id=book.id).first()
-    if status is None:
-        status = UserBookStatus(user_id=user.id, book_id=book.id)
-        session.add(status)
-    status.acknowledged = True
-    status.acknowledged_at = datetime.datetime.utcnow()
+    now = datetime.datetime.utcnow()
+    stmt = (
+        sqlite_insert(UserBookStatus)
+        .values(
+            user_id=user.id,
+            book_id=book.id,
+            acknowledged=True,
+            acknowledged_at=now,
+        )
+        .on_conflict_do_update(
+            index_elements=["user_id", "book_id"],
+            set_={
+                "acknowledged": True,
+                "acknowledged_at": now,
+            },
+        )
+    )
+    session.execute(stmt)
 
 
 def _unacknowledge_book(session, user: User, book: Book) -> None:
@@ -1026,10 +1233,11 @@ def _unacknowledge_book(session, user: User, book: Book) -> None:
 def acknowledge_book(
     request: Request,
     book_id: int,
-    series_id: int | None = Form(None),
+    return_to: str | None = Form(None),
     user: User = Depends(get_current_user),
 ):
-    redirect_url = f"/watchlist?series_id={series_id}" if series_id is not None else "/watchlist"
+    raw_return_to = return_to or request.query_params.get("return_to")
+    redirect_url = _safe_return_to(raw_return_to, default="/watchlist") or "/watchlist"
     session = get_session()
     try:
         book = _require_subscription_for_book(session, user, book_id)
@@ -1055,10 +1263,11 @@ def acknowledge_book(
 def unacknowledge_book(
     request: Request,
     book_id: int,
-    series_id: int | None = Form(None),
+    return_to: str | None = Form(None),
     user: User = Depends(get_current_user),
 ):
-    redirect_url = f"/watchlist?series_id={series_id}" if series_id is not None else "/watchlist"
+    raw_return_to = return_to or request.query_params.get("return_to")
+    redirect_url = _safe_return_to(raw_return_to, default="/watchlist") or "/watchlist"
     session = get_session()
     try:
         book = _require_subscription_for_book(session, user, book_id)
@@ -1083,14 +1292,13 @@ def unacknowledge_book(
 @app.post("/watchlist/acknowledge-all")
 def acknowledge_all(
     request: Request,
-    series_id: int | None = Form(None),
     library_filter: str | None = Form(None),
     book_ids: str | None = Form(None),
     user: User = Depends(get_current_user),
 ):
     session = get_session()
     try:
-        rows = _watchlist_query(session, user, series_id=series_id).all()
+        rows = _watchlist_query(session, user).all()
         if book_ids:
             target_ids = {int(x) for x in book_ids.split(",") if x.strip().isdigit()}
             rows = [r for r in rows if r[0].id in target_ids]
@@ -1125,16 +1333,10 @@ def acknowledge_all(
             acknowledged_ids.append(book.id)
         session.commit()
 
-        if series_id is not None:
-            remaining_unack = _watchlist_query(session, user, series_id=series_id).count()
-            redirect_url = f"/watchlist?series_id={series_id}" if remaining_unack > 0 else "/watchlist"
-        else:
-            redirect_url = "/watchlist"
-
         return _json_or_redirect(
             request,
             {"ok": True, "acknowledged_ids": acknowledged_ids, "count": len(acknowledged_ids)},
-            redirect_url,
+            "/watchlist",
         )
     finally:
         session.close()

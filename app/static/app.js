@@ -233,20 +233,9 @@ function applyCombinedVisibility() {
         ackAllBookIdsInput.value = ackTargetBookIds.join(",");
       }
 
-      const watchlistWrap = document.getElementById("watchlist-table-wrap");
-      const seriesName = watchlistWrap?.dataset?.filteredSeries || "";
-      const isSeriesView = Boolean(seriesName || new URLSearchParams(window.location.search).get("series_id"));
-
-      const btnText = isSeriesView
-        ? `Acknowledge all in this series (${ackCount})`
-        : `Acknowledge all (${ackCount})`;
       const noun = ackCount === 1 ? "book" : "books";
-      const confirmMsg = seriesName
-        ? `Acknowledge all ${ackCount} ${noun} in ${seriesName}?`
-        : `Acknowledge all ${ackCount} ${noun}?`;
-
-      ackAllBtn.textContent = btnText;
-      ackAllForm.dataset.confirmMsg = confirmMsg;
+      ackAllBtn.textContent = `Acknowledge all (${ackCount})`;
+      ackAllForm.dataset.confirmMsg = `Acknowledge all ${ackCount} ${noun}?`;
     }
   }
 
@@ -276,47 +265,24 @@ function applyCombinedVisibility() {
     const rows = watchlistWrap.querySelectorAll("tbody tr");
     const anyVisible = Array.from(rows).some((row) => row.style.display !== "none");
     if (rows.length && !anyVisible) {
-      const isSeriesView = Boolean(
-        watchlistWrap.dataset.filteredSeries ||
-        new URLSearchParams(window.location.search).get("series_id")
-      );
-
       if (searchQuery) {
-        watchlistHint.textContent = isSeriesView
-          ? "No books in this series match your search."
-          : "No watchlist books match your search.";
+        watchlistHint.textContent = "No watchlist books match your search.";
       } else if (watchlistLibraryFilter === "in_library") {
         watchlistHint.textContent = hideAcknowledged
-          ? (isSeriesView
-              ? "No unacknowledged library books in this series. Toggle “Hide acknowledged” off to see library books in this series."
-              : "No unacknowledged library books. Toggle “Hide acknowledged” off to see library books.")
-          : (isSeriesView
-              ? "No library books in this series."
-              : "No library books in this view.");
+          ? "No unacknowledged library books. Toggle “Hide acknowledged” off to see library books."
+          : "No library books in this view.";
       } else if (watchlistLibraryFilter === "not_in_library") {
         watchlistHint.textContent = hideAcknowledged
-          ? (isSeriesView
-              ? "No unacknowledged non-library books in this series. Toggle “Hide acknowledged” off to see non-library books in this series."
-              : "No unacknowledged non-library books. Toggle “Hide acknowledged” off to see non-library books.")
-          : (isSeriesView
-              ? "No non-library books in this series."
-              : "No non-library books in this view.");
+          ? "No unacknowledged non-library books. Toggle “Hide acknowledged” off to see non-library books."
+          : "No non-library books in this view.";
       } else if (watchlistLibraryFilter === "in_library_unacknowledged") {
-        watchlistHint.textContent = isSeriesView
-          ? "You're all caught up! No unacknowledged books in this series."
-          : "You're all caught up! No unacknowledged books are in your library.";
+        watchlistHint.textContent = "You're all caught up! No unacknowledged books are in your library.";
       } else if (normalizeWatchlistFilter(watchlistLibraryFilter) === "not_in_library_acknowledged") {
-        watchlistHint.textContent = isSeriesView
-          ? "Great news! No acknowledged books in this series are missing from your library."
-          : "Great news! No acknowledged books are missing from your library.";
+        watchlistHint.textContent = "Great news! No acknowledged books are missing from your library.";
       } else {
         watchlistHint.textContent = hideAcknowledged
-          ? (isSeriesView
-              ? "All caught up — every book in this series is acknowledged. Toggle “Hide acknowledged” off to see all books in this series."
-              : "All caught up — every book in this view is acknowledged. Toggle “Hide acknowledged” off to see all books.")
-          : (isSeriesView
-              ? "No books in this series."
-              : "No books in this view.");
+          ? "All caught up — every book in this view is acknowledged. Toggle “Hide acknowledged” off to see all books."
+          : "No books in this view.";
       }
       watchlistHint.style.display = "";
       watchlistWrap.style.display = "none";
@@ -807,6 +773,74 @@ function setupAbsScanStatus() {
   }
 }
 
+function setupSeriesAbsWatcher() {
+  const statusWrap = document.getElementById("abs-series-status-wrap");
+  if (!statusWrap) return;
+
+  const returnTo = window.location.pathname;
+  const initialLastScanned = statusWrap.getAttribute("data-last-scanned") || "";
+  let wasScanning = statusWrap.getAttribute("data-scanning") === "true";
+  let pollTimer = null;
+  let isChecking = false;
+
+  async function checkStatus() {
+    if (isChecking) return;
+    isChecking = true;
+    try {
+      const resp = await fetch("/account/library-status/progress", {
+        headers: { "Accept": "application/json" },
+        cache: "no-store",
+      });
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const isScanning = Boolean(data.scanning);
+      const actionWrap = document.getElementById("abs-series-action-wrap");
+
+      if (isScanning) {
+        wasScanning = true;
+        if (actionWrap) {
+          const pct = data.progress && typeof data.progress.percent === "number" ? ` (${data.progress.percent}%)` : "";
+          actionWrap.innerHTML = `<a href="/account/integrations?return_to=${encodeURIComponent(returnTo)}">⏳ ABS scanning${pct}...</a>`;
+        }
+        if (!pollTimer) {
+          pollTimer = setInterval(checkStatus, 3000);
+        }
+      } else {
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+        if (wasScanning || (data.last_scanned_at && data.last_scanned_at !== initialLastScanned && initialLastScanned !== "")) {
+          window.location.reload();
+        }
+      }
+    } catch (e) {
+      // Keep checking
+    } finally {
+      isChecking = false;
+    }
+  }
+
+  if (wasScanning) {
+    pollTimer = setInterval(checkStatus, 3000);
+  } else {
+    checkStatus();
+  }
+
+  window.addEventListener("pageshow", function () {
+    checkStatus();
+  });
+}
+
+function setupIntegrationsMenuLink() {
+  const link = document.getElementById("integrations-menu-link");
+  if (!link) return;
+  if (window.location.pathname !== "/account/integrations") {
+    const currentLoc = window.location.pathname + window.location.search;
+    link.href = `/account/integrations?return_to=${encodeURIComponent(currentLoc)}`;
+  }
+}
+
 function initApp() {
   setupPushButton();
   setupMenus();
@@ -817,6 +851,8 @@ function initApp() {
   setupSortableTables();
   setupWatchlistRowActions();
   setupAbsScanStatus();
+  setupSeriesAbsWatcher();
+  setupIntegrationsMenuLink();
 }
 
 if (document.readyState === "loading") {

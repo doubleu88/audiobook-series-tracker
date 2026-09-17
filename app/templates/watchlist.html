@@ -3,12 +3,7 @@
 <section class="block">
   <div class="section-head">
     <h2>
-      📋
-      {% if filtered_series %}
-        Watchlist &middot; {{ filtered_series.name }}
-      {% else %}
-        Watchlist
-      {% endif %}
+      📋 Watchlist
       <span class="meta-muted" id="watchlist-header-count">({{ unacknowledged_count }} / {{ entries|length }})</span>
     </h2>
     <div id="watchlist-header-controls" style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">
@@ -34,42 +29,37 @@
       {% if entries %}
       <form method="post" id="acknowledge-all-form" action="/watchlist/acknowledge-all"
             style="{{ '' if unacknowledged_count > 0 else 'display:none;' }}"
-            data-confirm-msg="Acknowledge all {{ unacknowledged_count }} book{{ "s" if unacknowledged_count != 1 else "" }}{{ " in " + filtered_series.name if filtered_series else "" }}?"
-            onsubmit="return confirm('Acknowledge all {{ unacknowledged_count }} book{{ "s" if unacknowledged_count != 1 else "" }}{{ " in " + filtered_series.name if filtered_series else "" }}?');">
-        {% if filtered_series %}<input type="hidden" name="series_id" value="{{ filtered_series.id }}">{% endif %}
+            data-confirm-msg="Acknowledge all {{ unacknowledged_count }} book{{ "s" if unacknowledged_count != 1 else "" }}?"
+            onsubmit="return confirm('Acknowledge all {{ unacknowledged_count }} book{{ "s" if unacknowledged_count != 1 else "" }}?');">
         <input type="hidden" name="library_filter" id="acknowledge-all-filter" value="all">
         <input type="hidden" name="book_ids" id="acknowledge-all-book-ids" value="">
         <button class="btn" type="submit" id="acknowledge-all-btn">
-          {{ "Acknowledge all in this series" if filtered_series else "Acknowledge all" }} ({{ unacknowledged_count }})
+          Acknowledge all ({{ unacknowledged_count }})
         </button>
       </form>
       {% endif %}
     </div>
   </div>
 
-  {% if filtered_series %}
-  <p class="meta-muted"><a href="/watchlist">&larr; Back to full watchlist</a></p>
-  {% else %}
   <p class="meta-muted">Released books from your subscriptions you haven't dealt with yet — this list has no
     time limit, so nothing falls off it just because you haven't logged in for a while. Click a series name to
-    view (and acknowledge) just that series. Search filters by series or book title.</p>
-  {% endif %}
+    view its series page. Search filters by series or book title.</p>
 
   {% if entries %}
   {% if abs_connected %}
   <div class="action-chips-wrap" style="margin-top: 1.25rem; display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
     <span class="meta-muted" style="font-size: 0.82rem;">Compare library to acknowledged books:</span>
     <div class="chip-island" id="action-chip-island" role="group" aria-label="Compare library to acknowledged books">
-      <button type="button" class="filter-chip" data-filter="in_library_unacknowledged" title="{% if filtered_series %}Books in this series in your library that you haven't acknowledged yet{% else %}Books in your library that you haven't acknowledged yet{% endif %}">
+      <button type="button" class="filter-chip" data-filter="in_library_unacknowledged" title="Books in your library that you haven't acknowledged yet">
         In library &amp; unacknowledged <span class="chip-count" id="chip-count-in-lib-unack"></span>
       </button>
-      <button type="button" class="filter-chip" data-filter="not_in_library_acknowledged" title="{% if filtered_series %}Books in this series marked as acknowledged that are not in your library{% else %}Books marked as acknowledged that are not in your library{% endif %}">
+      <button type="button" class="filter-chip" data-filter="not_in_library_acknowledged" title="Books marked as acknowledged that are not in your library">
         Not in library &amp; acknowledged <span class="chip-count" id="chip-count-missing-ack"></span>
       </button>
     </div>
   </div>
   {% endif %}
-  <div class="series-table-wrap" id="watchlist-table-wrap" {% if filtered_series %}data-filtered-series="{{ filtered_series.name }}"{% endif %} style="margin-top: 1rem;">
+  <div class="series-table-wrap" id="watchlist-table-wrap" style="margin-top: 1rem;">
   <table class="sortable" id="watchlist-table">
     <thead>
       <tr>
@@ -103,22 +93,16 @@
           {% endif %}
         </td>
         <td class="meta-muted">
-          {% if filtered_series %}
-            {{ entry.series.name }}
-          {% else %}
-            <a href="/watchlist?series_id={{ entry.series.id }}">{{ entry.series.name }}</a>
-          {% endif %}
+          <a href="/series/{{ entry.series.id }}">{{ entry.series.name }}</a>
         </td>
         <td class="meta-muted cell-nowrap">{{ entry.book.release_date }}</td>
         <td class="cell-nowrap">
           {% if entry.acknowledged %}
           <form class="inline" method="post" action="/books/{{ entry.book.id }}/unacknowledge">
-            {% if filtered_series %}<input type="hidden" name="series_id" value="{{ filtered_series.id }}">{% endif %}
             <button class="link" type="submit">Watch</button>
           </form>
           {% else %}
           <form class="inline" method="post" action="/books/{{ entry.book.id }}/acknowledge">
-            {% if filtered_series %}<input type="hidden" name="series_id" value="{{ filtered_series.id }}">{% endif %}
             <button class="link" type="submit">Acknowledge</button>
           </form>
           {% endif %}
@@ -128,11 +112,9 @@
     </tbody>
   </table>
   </div>
-  <p class="empty-hint" id="watchlist-all-hidden-hint" {% if filtered_series %}data-filtered-series="{{ filtered_series.name }}"{% endif %} style="display:none; margin-top: 1rem;"></p>
+  <p class="empty-hint" id="watchlist-all-hidden-hint" style="display:none; margin-top: 1rem;"></p>
   {% else %}
-  <p class="empty-hint">
-    {% if filtered_series %}You're all caught up on {{ filtered_series.name }}.{% else %}You're all caught up.{% endif %}
-  </p>
+  <p class="empty-hint">You're all caught up.</p>
   {% endif %}
 </section>
 {% endblock %}
