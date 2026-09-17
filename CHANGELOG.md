@@ -5,6 +5,10 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [1.16.0] - 2026-09-17
+
+- Two changes: a new Series page, replacing the per-series filter in the Watchlist (and also all links to it, allowing me to remove a huge amount of conditional HTML that was really annoying); and a detailed going-over of the workflow involved in adding a new series and then wanting to do various things to check it. I'm especially happy with copying the most recently viewed series row onto the top of the dashboard; so if you click something on a row that interests you, the page will refresh (as always) but you can keep working with that same series.
+
 ## [1.15.1] - 2026-09-14
 
 - Fix an annoyance where one adds a series (possibly after trying several times) but then has to try to load the books belonging to the series. It turns out the instant we have the series, we also have all of its books, so let's just parse them right away, so the user can Acknowledge or do something else with new books.
