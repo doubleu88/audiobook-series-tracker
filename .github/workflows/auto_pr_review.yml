@@ -1,90 +1,110 @@
-name: Gemini Auto-Review & Notify
+name: Gemini PR Review
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       pr_number:
-        description: 'PR number to review'
+        description: PR number to review
         required: true
         type: string
 
+concurrency:
+  group: gemini-review-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   review:
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Resolve PR Number
-        id: resolve_pr
-        run: |
-          # Pull PR number from manual input, or fall back to event payload
-          PR_NUM="${{ inputs.pr_number }}"
-          if [ -z "$PR_NUM" ]; then
-            PR_NUM="${{ github.event.pull_request.number }}"
-          fi
-          echo "pr_number=$PR_NUM" >> $GITHUB_OUTPUT
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GEMINI_CLI_TRUST_WORKSPACE: "true"
+      PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
 
-      - name: Checkout Repository
+    steps:
+      - name: Checkout default branch only
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
 
-      - name: Run Gemini PR Review
-        id: gemini_review
+      - name: Run Gemini PR review
+        id: gemini
         uses: google-github-actions/run-gemini-cli@v0.1.22
-        env:
-          GEMINI_CLI_TRUST_WORKSPACE: 'true'
         with:
           gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          github_pr_number: ${{ env.PR_NUMBER }}
           prompt: |
-            Perform a thorough code review of PR #${{ steps.resolve_pr.outputs.pr_number }}.
-            Focus on code quality, security vulnerabilities, and performance.
+            You are reviewing GitHub PR #${{ env.PR_NUMBER }} in ${{ github.repository }}.
 
-            Post your inline comments and summary review directly on the PR using GitHub CLI tools.
+            Do not execute project code, install dependencies, or check out the PR branch.
+            Read the change with:
+              gh pr view ${{ env.PR_NUMBER }} --json title,body,author,files,baseRefName,headRefName
+              gh pr diff ${{ env.PR_NUMBER }}
 
-            Output your final decision strictly adhering to the specified JSON schema.
-          gemini_args: |
-            --json-schema '{"type":"object","properties":{"recommendation":{"type":"string","enum":["APPROVED","CHANGES_REQUESTED"]},"summary":{"type":"string"}},"required":["recommendation","summary"]}'
+            Review for correctness, security, and performance. Be specific. Skip nits unless they can cause bugs.
 
-      - name: Extract Review Decision
-        id: parse_output
-        if: always()
-        run: |
-          JSON_OUTPUT='${{ steps.gemini_review.outputs.structured_output }}'
-          RECOMMENDATION=$(echo "$JSON_OUTPUT" | jq -r '.recommendation // "UNKNOWN"')
-          SUMMARY=$(echo "$JSON_OUTPUT" | jq -r '.summary // "No summary provided"')
-          
-          echo "recommendation=$RECOMMENDATION" >> $GITHUB_OUTPUT
-          echo "summary=$SUMMARY" >> $GITHUB_OUTPUT
+            You MUST post the review with GitHub CLI (not stdout only):
+              gh pr review ${{ env.PR_NUMBER }} --comment --body "$(cat <<'EOF'
+            ...markdown review...
+            EOF
+            )"
 
-      - name: Fetch PR Details
-        id: pr_details
-        if: steps.parse_output.outputs.recommendation == 'APPROVED'
+            Do not approve. Do not request changes. Comment only.
+
+            After posting, print exactly one JSON object and nothing else:
+            {"posted": true, "recommendation": "COMMENT", "summary": "<2-4 sentence summary>"}
+
+      - name: Parse Gemini summary
+        id: parse
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RAW: ${{ steps.gemini.outputs.summary }}
         run: |
-          PR_DATA=$(gh pr view ${{ steps.resolve_pr.outputs.pr_number }} --json title,url,author)
-          echo "title=$(echo "$PR_DATA" | jq -r '.title')" >> $GITHUB_OUTPUT
-          echo "url=$(echo "$PR_DATA" | jq -r '.url')" >> $GITHUB_OUTPUT
-          echo "author=$(echo "$PR_DATA" | jq -r '.author.login')" >> $GITHUB_OUTPUT
+          set -euo pipefail
+          JSON="$(printf '%s\n' "$RAW" | sed -n '/[[:space:]]*{/,$p' | jq -c 'if type=="object" then . else empty end' | tail -n1 || true)"
+          if [ -z "$JSON" ]; then
+            JSON="$(jq -nc --arg s "$RAW" '{posted:false,recommendation:"UNKNOWN",summary:$s}')"
+          fi
+          SUMMARY="$(jq -r '.summary // "Gemini finished a review."' <<<"$JSON")"
+          {
+            echo "recommendation=$(jq -r '.recommendation // "UNKNOWN"' <<<"$JSON")"
+            echo "summary<<EOF"
+            printf '%s\n' "$SUMMARY"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Send Telegram Notification
-        if: steps.parse_output.outputs.recommendation == 'APPROVED'
+      - name: Confirm a review was posted
         run: |
-          MESSAGE="✨ *PR Approved by Gemini!*
+          set -euo pipefail
+          COUNT="$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
+            --jq '[.[] | select(.user.login=="github-actions[bot]" or .body != "")] | length')"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::Gemini did not post a PR review"
+            exit 1
+          fi
 
-          *Repository:* `${{ github.repository }}`
-          *PR:* [ #${{ steps.resolve_pr.outputs.pr_number }} - ${{ steps.pr_details.outputs.title }} ](${{ steps.pr_details.outputs.url }})
-          *Author:* ${{ steps.pr_details.outputs.author }}
-
-          *Review Summary:*
-          ${{ steps.parse_output.outputs.summary }}
-
-          👉 [Click here to review and merge](${{ steps.pr_details.outputs.url }})"
-
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d "text=$MESSAGE" \
-            -d "parse_mode=Markdown"
+      - name: Notify Telegram
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SUMMARY: ${{ steps.parse.outputs.summary }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          PR_JSON="$(gh pr view "$PR_NUMBER" --json title,url,author)"
+          TITLE="$(jq -r '.title' <<<"$PR_JSON")"
+          URL="$(jq -r '.url' <<<"$PR_JSON")"
+          AUTHOR="$(jq -r '.author.login' <<<"$PR_JSON")"
+          MESSAGE="$(printf 'Gemini reviewed %s#%s\n%s\nAuthor: %s\n\n%s\n\n%s' \
+            "$REPO" "$PR_NUMBER" "$TITLE" "$AUTHOR" "$SUMMARY" "$URL")"
+          curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${MESSAGE}"
