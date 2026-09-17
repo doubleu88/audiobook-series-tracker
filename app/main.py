@@ -4,6 +4,7 @@ import io
 import logging
 import secrets
 import time
+from urllib.parse import urlparse
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -30,7 +31,6 @@ from app.models import Book, PushSubscription, Series, Subscription, User, UserB
 from app.prowlarr import ProwlarrClient, ProwlarrError
 from app.push import get_vapid_public_key_b64
 from app.scheduler import (
-    check_availability_for_user,
     get_user_scan_progress,
     is_user_scanning,
     mark_user_scanning,
@@ -321,6 +321,16 @@ def regenerate_calendar_token(request: Request, user: User = Depends(get_current
     return RedirectResponse(request.headers.get("referer") or "/", status_code=303)
 
 
+def _safe_return_to(url: str | None, default: str | None = None) -> str | None:
+    """Ensures return_to is a safe same-origin path, preventing open redirects and script injection."""
+    if not url:
+        return default
+    url = url.strip()
+    if url.startswith("/") and not url.startswith("//") and not url.startswith("/\\"):
+        return url
+    return default
+
+
 def _json_or_redirect(
     request: Request,
     payload: dict,
@@ -329,7 +339,8 @@ def _json_or_redirect(
 ) -> Response:
     if request.headers.get("accept") == "application/json":
         return JSONResponse(payload, status_code=status_code)
-    return RedirectResponse(redirect_url, status_code=303)
+    safe_url = _safe_return_to(redirect_url, default="/") or "/"
+    return RedirectResponse(safe_url, status_code=303)
 
 
 def _integrations_context(request: Request, user: User, session, abs_error: str | None = None, prowlarr_error: str | None = None) -> dict:
@@ -379,7 +390,8 @@ def integrations_form(
     session = get_session()
     try:
         context = _integrations_context(request, user, session)
-        context["return_to"] = return_to or request.query_params.get("return_to")
+        raw_return_to = return_to or request.query_params.get("return_to")
+        context["return_to"] = _safe_return_to(raw_return_to, default=None)
     finally:
         session.close()
     return templates.TemplateResponse("integrations.html", context)
@@ -818,8 +830,10 @@ def _require_subscription(session, user: User, series_id: int) -> Subscription |
 
 def _redirect_series_or_dash(request: Request, series_id: int) -> RedirectResponse:
     referer = request.headers.get("referer", "")
-    if f"/series/{series_id}" in referer:
-        return RedirectResponse(f"/series/{series_id}", status_code=303)
+    if referer:
+        path = urlparse(referer).path.rstrip("/")
+        if path == f"/series/{series_id}":
+            return RedirectResponse(f"/series/{series_id}", status_code=303)
     return RedirectResponse("/", status_code=303)
 
 
@@ -1151,6 +1165,10 @@ def _watchlist_query(
 
 @app.get("/watchlist", response_class=HTMLResponse)
 def watchlist(request: Request, user: User = Depends(get_current_user)):
+    series_id_param = request.query_params.get("series_id")
+    if series_id_param and series_id_param.isdigit():
+        return RedirectResponse(f"/series/{series_id_param}", status_code=302)
+
     session = get_session()
     try:
         rows = _watchlist_query(
@@ -1218,7 +1236,8 @@ def acknowledge_book(
     return_to: str | None = Form(None),
     user: User = Depends(get_current_user),
 ):
-    redirect_url = return_to or request.query_params.get("return_to") or "/watchlist"
+    raw_return_to = return_to or request.query_params.get("return_to")
+    redirect_url = _safe_return_to(raw_return_to, default="/watchlist") or "/watchlist"
     session = get_session()
     try:
         book = _require_subscription_for_book(session, user, book_id)
@@ -1247,7 +1266,8 @@ def unacknowledge_book(
     return_to: str | None = Form(None),
     user: User = Depends(get_current_user),
 ):
-    redirect_url = return_to or request.query_params.get("return_to") or "/watchlist"
+    raw_return_to = return_to or request.query_params.get("return_to")
+    redirect_url = _safe_return_to(raw_return_to, default="/watchlist") or "/watchlist"
     session = get_session()
     try:
         book = _require_subscription_for_book(session, user, book_id)
