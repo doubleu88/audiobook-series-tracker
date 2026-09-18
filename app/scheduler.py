@@ -12,7 +12,7 @@ from app.calendar_feed import event_content_changed, mark_calendar_revision
 from app.db import DATA_DIR, get_session
 from app.models import Book, PushSubscription, Series, Subscription, User, UserBookStatus
 from app.push import send_push
-from app.scraper import ScrapedSeries, SeriesPageError, fetch_series
+from app.scraper import ScrapedSeries, SeriesPageError, fetch_series, _norm_title_for_group
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 
@@ -95,24 +95,24 @@ def update_series_from_scraped(session, series: Series, scraped: ScrapedSeries) 
 
     for scraped_book in scraped.books:
         book = existing_by_asin.get(scraped_book.asin)
+        if (
+            book is None
+            and scraped_book.title
+            and scraped_book.title.lower().strip() in existing_by_title
+        ):
+            book = existing_by_title.get(scraped_book.title.lower().strip())
         if book is None and scraped_book.position is not None:
             book = existing_by_pos.get(scraped_book.position)
-            if (
-                book is None
-                and scraped_book.title
-                and scraped_book.title.lower().strip() in existing_by_title
-            ):
-                book = existing_by_title.get(scraped_book.title.lower().strip())
-            if book is not None:
-                logger.info(
-                    "Updating ASIN for series %s book #%s '%s': %s -> %s",
-                    series.name,
-                    scraped_book.position,
-                    scraped_book.title,
-                    book.asin,
-                    scraped_book.asin,
-                )
-                book.asin = scraped_book.asin
+        if book is not None and book.asin != scraped_book.asin:
+            logger.info(
+                "Updating ASIN for series %s book #%s '%s': %s -> %s",
+                series.name,
+                scraped_book.position,
+                scraped_book.title,
+                book.asin,
+                scraped_book.asin,
+            )
+            book.asin = scraped_book.asin
 
         if book is None:
             book = Book(series_id=series.id, asin=scraped_book.asin)
@@ -165,6 +165,22 @@ def update_series_from_scraped(session, series: Series, scraped: ScrapedSeries) 
             if book.asin not in scraped_asins:
                 mark_calendar_revision(book, changed=True, now=now)
 
+    # Clean up duplicate editions at the same position that were deduplicated away
+    scraped_asins = {b.asin for b in scraped.books}
+    for existing in list(series.books):
+        if existing.asin not in scraped_asins and existing.position is not None:
+            norm_existing = _norm_title_for_group(existing.title)
+            for sb in scraped.books:
+                if existing.position == sb.position and norm_existing == _norm_title_for_group(sb.title):
+                    logger.info(
+                        "Removing obsolete duplicate edition '%s' (%s) from series %s",
+                        existing.title,
+                        existing.asin,
+                        series.name,
+                    )
+                    session.query(UserBookStatus).filter_by(book_id=existing.id).delete()
+                    session.delete(existing)
+                    break
     series.name = scraped.name
     series.last_checked = datetime.datetime.utcnow()
     session.commit()
