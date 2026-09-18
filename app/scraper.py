@@ -1,10 +1,10 @@
-# Audible has no public API for series/release data. Audnexus (api.audnex.us)
-# was evaluated first but only supports lookup-by-known-ASIN, not series
-# listing or search. So this scrapes Audible's own public series and search
-# pages instead, which robots.txt explicitly permits crawling.
+# Audible's Catalog API (/1.0/catalog/products) provides structured series
+# relationships and child book metadata. Series data is fetched directly via
+# the Catalog API, with multi-market deduplication favoring canonical US editions
+# and proper handling for upcoming/Date TBD placeholder releases.
+# Plain-text series search uses Audible's search page via curl.
 
 import datetime
-import json
 import logging
 import re
 import subprocess
@@ -12,6 +12,7 @@ import urllib.parse
 from dataclasses import dataclass
 
 from bs4 import BeautifulSoup
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -104,185 +105,155 @@ def _series_url(asin: str) -> str:
     return f"https://www.audible.com/series/x/{asin}"
 
 
-def _parse_release_date(text: str) -> datetime.date | None:
-    match = re.search(r"(\d{2})-(\d{2})-(\d{2})", text)
-    if not match:
+def _is_us_edition(prod: dict) -> bool:
+    sku = prod.get("sku") or ""
+    pub = (prod.get("publisher_name") or "").lower()
+    if any(sku.endswith(m) for m in ("UK", "AU", "CA", "DE", "FR")):
+        return False
+    if any(fp in sku for fp in ("_HODD_", "_HBGA_", "_WFHO_", "_BLND_", "_ORIO_", "_QUER_")):
+        return False
+    if any(fp in pub for fp in ("hodder", "bolinda", "w.f. howes", "orion", "quercus")):
+        return False
+    return True
+
+
+def _parse_sequence(seq_str: str | None) -> float | None:
+    if not seq_str:
         return None
-    month, day, year = (int(part) for part in match.groups())
     try:
-        return datetime.date(2000 + year, month, day)
+        return float(seq_str)
     except ValueError:
-        # A single book with an unparseable date shouldn't abort adding the
-        # whole series — confirmed via a real Audible page whose markup no
-        # longer matches this format for some titles (see _parse_new_template).
-        logger.warning("Unparseable release date text %r, treating as unknown", text)
-        return None
+        pass
+    m = re.match(r"^(\d+(?:\.\d+)?)", str(seq_str))
+    if m:
+        try:
+            return float(m.group(1))
+        except ValueError:
+            pass
+    return None
 
 
-def _parse_new_template_release_date(script_tag) -> datetime.date | None:
-    if not script_tag or not script_tag.string:
-        return None
+def _norm_title_for_group(title: str) -> str:
+    t = title.split(":")[0].split("—")[0].strip().lower()
+    return re.sub(r"[^a-z0-9]", "", t)
+
+
+def fetch_series_via_api(series_asin: str, fallback_url: str) -> ScrapedSeries:
+    url = f"https://api.audible.com/1.0/catalog/products/{series_asin}"
+    params = {"response_groups": "product_attrs,product_desc,relationships"}
+    headers = {"User-Agent": USER_AGENT}
     try:
-        data = json.loads(script_tag.string)
-        return datetime.date.fromisoformat(data["releaseDate"])
-    except (json.JSONDecodeError, KeyError, ValueError, TypeError):
-        return None
+        with httpx.Client(timeout=20.0) as client:
+            resp = client.get(url, params=params, headers=headers)
+            if resp.status_code != 200:
+                raise SeriesPageError(f"Audible API returned HTTP {resp.status_code} for series {series_asin}")
+            data = resp.json().get("product", {})
 
+            series_name = data.get("title") or "Unknown series"
+            relationships = data.get("relationships", []) or []
+            series_rels = [
+                r for r in relationships
+                if r.get("relationship_type") == "series" and r.get("asin")
+            ]
+            if not series_rels:
+                raise SeriesPageError(f"No series relationships found in Audible API for series {series_asin}")
 
-def _extract_book_number(text: str) -> float | None:
-    match = re.search(r"Book\s+([\d.]+)", text)
-    if not match:
-        return None
-    try:
-        return float(match.group(1))
-    except ValueError:
-        return None
+            child_asins = list(dict.fromkeys(r["asin"] for r in series_rels))
+            products_by_asin: dict[str, dict] = {}
+            for i in range(0, len(child_asins), 50):
+                chunk = child_asins[i : i + 50]
+                try:
+                    p_resp = client.get(
+                        "https://api.audible.com/1.0/catalog/products",
+                        params={
+                            "asins": ",".join(chunk),
+                            "response_groups": "product_attrs,product_desc,contributors,media,sku",
+                        },
+                        headers=headers,
+                    )
+                    if p_resp.status_code == 200:
+                        for p in p_resp.json().get("products", []):
+                            products_by_asin[p["asin"]] = p
+                except Exception as chunk_exc:
+                    logger.warning("Error fetching product chunk for series %s: %s", series_asin, chunk_exc)
 
+        candidates_by_group: dict[tuple, list[tuple[dict, dict]]] = {}
+        for r in series_rels:
+            asin = r["asin"]
+            p = products_by_asin.get(asin, {})
+            title = (p.get("title") or asin).strip()
+            pos = _parse_sequence(r.get("sequence"))
+            norm = _norm_title_for_group(title)
+            key = (pos, norm) if pos is not None else (None, asin)
+            candidates_by_group.setdefault(key, []).append((r, p))
 
-def _parse_position(item) -> float | None:
-    heading = item.find("h2")
-    if not heading:
-        return None
-    return _extract_book_number(heading.get_text(strip=True))
+        books: list[ScrapedBook] = []
+        for (pos, norm), group in candidates_by_group.items():
+            group.sort(
+                key=lambda item: (
+                    (item[1].get("sku") or "").startswith("PL_HLDR"),
+                    not _is_us_edition(item[1]),
+                    item[0]["asin"],
+                )
+            )
+            best_rel, best_prod = group[0]
+            asin = best_rel["asin"]
+            title = best_prod.get("title") or asin
+            position = _parse_sequence(best_rel.get("sequence"))
+            sku = best_prod.get("sku") or ""
+            raw_date = best_prod.get("release_date")
 
+            if raw_date == "2200-01-01" or sku.startswith("PL_HLDR"):
+                release_date = None
+                book_url = fallback_url
+            elif raw_date:
+                try:
+                    release_date = datetime.date.fromisoformat(raw_date)
+                except ValueError:
+                    release_date = None
+                book_url = f"https://www.audible.com/pd/{asin}"
+            else:
+                release_date = None
+                book_url = f"https://www.audible.com/pd/{asin}"
 
-def _dedupe_by_title(books: list[ScrapedBook]) -> list[ScrapedBook]:
-    """Audible's series pages sometimes list the same book twice under different
-    ASINs — a second edition/format callout that isn't inside the "Book N"
-    heading the position parser looks for, so it comes through with
-    position=None alongside the real, positioned entry. Keep one entry per
-    title: prefer whichever has a position (the one actually placed in the
-    numbered list), otherwise keep the first one encountered (stable across
-    re-scrapes since page DOM order doesn't change)."""
-    best_by_title: dict[str, ScrapedBook] = {}
-    for book in books:
-        existing = best_by_title.get(book.title)
-        if existing is None or (existing.position is None and book.position is not None):
-            best_by_title[book.title] = book
+            images = best_prod.get("product_images", {}) or {}
+            image_url = images.get("500") or images.get("120")
 
-    deduped: list[ScrapedBook] = []
-    seen_titles: set[str] = set()
-    for book in books:
-        if book.title in seen_titles:
-            continue
-        seen_titles.add(book.title)
-        deduped.append(best_by_title[book.title])
-    return deduped
+            books.append(
+                ScrapedBook(
+                    asin=asin,
+                    title=title,
+                    position=position,
+                    release_date=release_date,
+                    url=book_url,
+                    image_url=image_url,
+                )
+            )
 
-
-def _parse_old_template(soup: BeautifulSoup, fallback_url: str) -> list[ScrapedBook]:
-    books: list[ScrapedBook] = []
-    for item in soup.select("li.productListItem"):
-        item_id = item.get("id", "")
-        asin_match = re.search(r"product-list-item-([A-Z0-9]{10})", item_id)
-        if not asin_match:
-            continue
-        asin = asin_match.group(1)
-
-        title = item.get("aria-label", "").strip() or asin
-
-        link = item.find("a", href=re.compile(r"/pd/"))
-        url = f"https://www.audible.com{link['href'].split('?')[0]}" if link else fallback_url
-
-        release_date = None
-        date_item = item.select_one("li.releaseDateLabel span")
-        if date_item:
-            release_date = _parse_release_date(date_item.get_text(strip=True))
-
-        position = _parse_position(item)
-
-        image_url = None
-        img = item.select_one("div.adbl-asin-impression img")
-        if img and img.get("src"):
-            image_url = re.sub(r"_SL\d+_", "_SL120_", img["src"])
-
-        books.append(
-            ScrapedBook(
-                asin=asin,
-                title=title,
-                position=position,
-                release_date=release_date,
-                url=url,
-                image_url=image_url,
+        books.sort(
+            key=lambda b: (
+                b.position if b.position is not None else 9999,
+                b.release_date or datetime.date.max,
+                b.title,
             )
         )
-    return books
+        if not books:
+            raise SeriesPageError(f"No books found in Audible API for series {series_asin}")
 
-
-def _parse_new_template(soup: BeautifulSoup) -> list[ScrapedBook]:
-    # Audible has been rolling out a redesigned series page (built on
-    # <adbl-product-row> web components) that carries no
-    # li.productListItem markup at all — confirmed against ~50% of a
-    # sample of 106 real series pages. Each row embeds a small JSON blob
-    # with a clean, unambiguous ISO release date, which is also more
-    # reliable than the old template's hand-scraped "MM-DD-YY" text.
-    books: list[ScrapedBook] = []
-    for row in soup.select("adbl-product-row"):
-        link = row.select_one('a[href*="/pd/"]')
-        if not link or not link.get("href"):
-            continue
-        asin_match = ASIN_RE.search(link["href"])
-        if not asin_match:
-            continue
-        asin = asin_match.group(1)
-
-        title_el = row.select_one('h3[slot="title"]')
-        title = title_el.get_text(strip=True) if title_el else asin
-
-        url = f"https://www.audible.com{link['href'].split('?')[0]}"
-
-        release_date = _parse_new_template_release_date(
-            row.find("script", {"type": "application/json"})
+        return ScrapedSeries(
+            asin=series_asin, name=series_name, url=fallback_url, books=books
         )
-
-        position = _extract_book_number(row.get("series-header", ""))
-
-        image_url = None
-        img = row.select_one("img")
-        if img and img.get("src"):
-            image_url = re.sub(r"_SL\d+_", "_SL120_", img["src"])
-
-        books.append(
-            ScrapedBook(
-                asin=asin,
-                title=title,
-                position=position,
-                release_date=release_date,
-                url=url,
-                image_url=image_url,
-            )
-        )
-    return books
-
-
-def parse_series_page(html: str, fallback_url: str) -> ScrapedSeries:
-    soup = BeautifulSoup(html, "html.parser")
-
-    h1 = soup.find("h1")
-    name = h1.get_text(strip=True) if h1 else "Unknown series"
-
-    books = _parse_old_template(soup, fallback_url)
-    if not books:
-        books = _parse_new_template(soup)
-
-    if not books:
-        raise SeriesPageError("No books found on series page — page layout may have changed.")
-
-    books = _dedupe_by_title(books)
-
-    series_asin_match = ASIN_RE.search(fallback_url)
-    series_asin = series_asin_match.group(1) if series_asin_match else fallback_url
-
-    return ScrapedSeries(asin=series_asin, name=name, url=fallback_url, books=books)
+    except SeriesPageError:
+        raise
+    except Exception as e:
+        logger.warning("Audible API series lookup failed for %s: %s", series_asin, e)
+        raise SeriesPageError(f"Audible API series lookup failed for {series_asin}: {e}") from e
 
 
 def fetch_series(url_or_asin: str) -> ScrapedSeries:
     asin = extract_series_asin(url_or_asin)
     url = url_or_asin if url_or_asin.startswith("http") else _series_url(asin)
-
-    html = _curl_get(url)
-
-    return parse_series_page(html, fallback_url=url)
+    return fetch_series_via_api(asin, fallback_url=url)
 
 
 def _name_from_slug(slug: str) -> str:
