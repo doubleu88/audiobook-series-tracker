@@ -202,6 +202,13 @@ def update_series_from_scraped(session, series: Series, scraped: ScrapedSeries) 
                     is_primary=True,
                 ),
             )
+            scraped_ed_asins.add(scraped_book.asin)
+
+        # Remove stale editions no longer associated with this slot
+        for ed_asin, old_ed in list(existing_editions.items()):
+            if ed_asin not in scraped_ed_asins:
+                session.delete(old_ed)
+                del existing_editions[ed_asin]
 
         for ed in scraped_book.editions:
             is_prim = ed.asin == scraped_book.asin
