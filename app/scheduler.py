@@ -83,12 +83,37 @@ def update_series_from_scraped(session, series: Series, scraped: ScrapedSeries) 
     is_first_scrape = series.last_checked is None
     series_name_changed = series.name != scraped.name
     existing_by_asin = {book.asin: book for book in series.books}
+    existing_by_pos = {
+        book.position: book for book in series.books if book.position is not None
+    }
+    existing_by_title = {
+        book.title.lower().strip(): book for book in series.books if book.title
+    }
     new_books: list[Book] = []
     dated_books: list[Book] = []
     released_today: list[Book] = []
 
     for scraped_book in scraped.books:
         book = existing_by_asin.get(scraped_book.asin)
+        if book is None and scraped_book.position is not None:
+            book = existing_by_pos.get(scraped_book.position)
+            if (
+                book is None
+                and scraped_book.title
+                and scraped_book.title.lower().strip() in existing_by_title
+            ):
+                book = existing_by_title.get(scraped_book.title.lower().strip())
+            if book is not None:
+                logger.info(
+                    "Updating ASIN for series %s book #%s '%s': %s -> %s",
+                    series.name,
+                    scraped_book.position,
+                    scraped_book.title,
+                    book.asin,
+                    scraped_book.asin,
+                )
+                book.asin = scraped_book.asin
+
         if book is None:
             book = Book(series_id=series.id, asin=scraped_book.asin)
             session.add(book)
@@ -187,6 +212,16 @@ def refresh_series(series_id: int) -> None:
             return
 
         update_series_from_scraped(session, series, scraped)
+        for sub in series.subscriptions:
+            try:
+                reconcile_series_with_cached_asins(session, sub.user_id, series)
+            except Exception:
+                logger.warning(
+                    "Error reconciling series %s for user %s with cached ASINs",
+                    series.id,
+                    sub.user_id,
+                    exc_info=True,
+                )
     finally:
         session.close()
 
