@@ -107,15 +107,33 @@ def _series_url(asin: str) -> str:
 
 
 def _is_us_edition(prod: dict) -> bool:
+    # 1. Direct Audible Catalog API rights check
+    if prod.get("is_world_rights") is True:
+        return True
+    regions = prod.get("distribution_rights_region")
+    if regions is not None:
+        return "US" in regions
+
+    # 2. Heuristic fallback based on SKU and publisher
     sku = prod.get("sku") or ""
     pub = (prod.get("publisher_name") or "").lower()
     if any(sku.endswith(m) for m in ("UK", "AU", "CA", "DE", "FR")):
         return False
-    if any(fp in sku for fp in ("_HODD_", "_HBGA_", "_WFHO_", "_BLND_", "_ORIO_", "_QUER_")):
+    if re.search(r"_[A-Z]{2,3}(UK|AU|CA|DE|FR)_", sku):
         return False
-    if any(fp in pub for fp in ("hodder", "bolinda", "w.f. howes", "orion", "quercus")):
+    if any(fp in sku for fp in ("_HODD_", "_HBGA_", "_WFHO_", "_BLND_", "_ORIO_", "_QUER_", "_HOWE_")):
+        return False
+    if any(fp in pub for fp in (
+        "hodder", "bolinda", "w.f. howes", "wf howes", "howes", "orion", "quercus",
+        "little, brown audio", "little, brown book group", "time warner", "pan macmillan",
+    )):
         return False
     return True
+
+
+def _is_specialty_edition(prod: dict) -> bool:
+    title = (prod.get("title") or "").lower()
+    return any(term in title for term in ("booktrack", "dramatized", "graphicaudio", "abridged", "soundtrack"))
 
 
 def _parse_sequence(seq_str: str | None) -> float | None:
@@ -168,7 +186,7 @@ def fetch_series_via_api(series_asin: str, fallback_url: str) -> ScrapedSeries:
                         "https://api.audible.com/1.0/catalog/products",
                         params={
                             "asins": ",".join(chunk),
-                            "response_groups": "product_attrs,product_desc,contributors,media,sku",
+                            "response_groups": "product_attrs,product_desc,contributors,media,sku,rights",
                         },
                         headers=headers,
                     )
@@ -194,6 +212,7 @@ def fetch_series_via_api(series_asin: str, fallback_url: str) -> ScrapedSeries:
                 key=lambda item: (
                     (item[1].get("sku") or "").startswith("PL_HLDR"),
                     not _is_us_edition(item[1]),
+                    _is_specialty_edition(item[1]),
                     item[0]["asin"],
                 )
             )
