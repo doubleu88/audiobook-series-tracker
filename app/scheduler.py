@@ -107,25 +107,31 @@ def update_series_from_scraped(session, series: Series, scraped: ScrapedSeries) 
 
     for scraped_book in scraped.books:
         book = existing_by_asin.get(scraped_book.asin)
+        if book is not None and book.id in matched_book_ids:
+            book = None
         if book is None and scraped_book.editions:
             for ed in scraped_book.editions:
-                if ed.asin in existing_by_asin:
-                    book = existing_by_asin[ed.asin]
-                    break
-                if ed.asin in existing_by_edition_asin:
-                    book = existing_by_edition_asin[ed.asin]
+                cand = existing_by_asin.get(ed.asin) or existing_by_edition_asin.get(ed.asin)
+                if cand is not None and cand.id not in matched_book_ids:
+                    book = cand
                     break
         if book is None and scraped_book.position is not None:
-            book = existing_by_pos.get(scraped_book.position)
+            cand = existing_by_pos.get(scraped_book.position)
+            if cand is not None and cand.id not in matched_book_ids:
+                book = cand
         if (
             book is None
             and scraped_book.title
             and scraped_book.title.lower().strip() in existing_by_title
         ):
-            book = existing_by_title.get(scraped_book.title.lower().strip())
+            cand = existing_by_title.get(scraped_book.title.lower().strip())
+            if cand is not None and cand.id not in matched_book_ids:
+                book = cand
         if book is None and scraped_book.title:
             norm_scraped = _norm_title_for_group(scraped_book.title, series.name)
-            book = existing_by_norm_title.get(norm_scraped)
+            cand = existing_by_norm_title.get(norm_scraped)
+            if cand is not None and cand.id not in matched_book_ids:
+                book = cand
 
         if book is not None and book.asin != scraped_book.asin:
             logger.info(

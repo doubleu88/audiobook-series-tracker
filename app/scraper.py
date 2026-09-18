@@ -143,13 +143,15 @@ def _is_us_edition(prod: dict) -> bool:
 
 def _classify_edition(prod: dict) -> str:
     title = (prod.get("title") or "").lower()
-    if any(term in title for term in ("dramatized", "graphicaudio", "graphic audio", "soundtrack")):
+    subtitle = (prod.get("subtitle") or "").lower()
+    full_text = f"{title} {subtitle}"
+    if any(term in full_text for term in ("dramatized", "graphicaudio", "graphic audio", "soundtrack")):
         return "dramatized"
-    if "booktrack" in title:
+    if "booktrack" in full_text:
         return "booktrack"
-    if any(term in title for term in ("box set", "boxed set", "omnibus", "collection")) or re.search(r"books?\s*\d+\s*[-–—to]+\s*\d+", title):
+    if any(term in full_text for term in ("box set", "boxed set", "omnibus", "collection")) or re.search(r"books?\s*\d+\s*[-–—to]+\s*\d+", full_text):
         return "box_set"
-    if "abridged" in title and "unabridged" not in title:
+    if "abridged" in full_text and "unabridged" not in full_text:
         return "abridged"
     if not _is_us_edition(prod):
         return "foreign"
@@ -165,22 +167,23 @@ def _parse_omnibus_range(*texts: str | None) -> tuple[float, float] | None:
     for text in texts:
         if not text:
             continue
-        # 1. Direct sequence range like '1-3'
-        m1 = re.match(r"^(\d+(?:\.\d+)?)\s*[-–—to]\s*(\d+(?:\.\d+)?)$", str(text).strip(), re.IGNORECASE)
+        s = str(text).strip()
+        # 1. Direct sequence range like '1-3', '1 - 3', '1 to 3'
+        m1 = re.match(r"^(\d+(?:\.\d+)?)\s*(?:[-–—]|\bto\b)\s*(\d+(?:\.\d+)?)$", s, re.IGNORECASE)
         if m1:
             try:
                 return float(m1.group(1)), float(m1.group(2))
             except ValueError:
                 pass
         # 2. 'books 1-3' or 'books 1 to 3'
-        m2 = re.search(r"books?\s*(\d+(?:\.\d+)?)\s*[-–—to]+\s*(\d+(?:\.\d+)?)", str(text), re.IGNORECASE)
+        m2 = re.search(r"books?\s*(\d+(?:\.\d+)?)\s*(?:[-–—]|\bto\b)\s*(\d+(?:\.\d+)?)", s, re.IGNORECASE)
         if m2:
             try:
                 return float(m2.group(1)), float(m2.group(2))
             except ValueError:
                 pass
-        # 3. 'Book 1, 2, 3'
-        m3 = re.search(r"books?\s*(\d+)(?:\s*,\s*\d+)*\s*,\s*(?:and\s*)?(\d+)", str(text), re.IGNORECASE)
+        # 3. 'Book 1, 2, 3' or 'Books 1, 2 and 3'
+        m3 = re.search(r"books?\s*(\d+)(?:\s*,\s*\d+)*\s*(?:,|and|\s)+\s*(\d+)", s, re.IGNORECASE)
         if m3:
             try:
                 return float(m3.group(1)), float(m3.group(2))
@@ -192,11 +195,14 @@ def _parse_omnibus_range(*texts: str | None) -> tuple[float, float] | None:
 def _parse_sequence(seq_str: str | None) -> float | None:
     if not seq_str:
         return None
+    s = str(seq_str).strip()
+    if any(sep in s for sep in ("-", "–", "—", " to ", ",")):
+        return None
     try:
-        return float(seq_str)
+        return float(s)
     except ValueError:
         pass
-    m = re.match(r"^(\d+(?:\.\d+)?)", str(seq_str))
+    m = re.match(r"^(\d+(?:\.\d+)?)", s)
     if m:
         try:
             return float(m.group(1))
@@ -265,21 +271,11 @@ def fetch_series_via_api(series_asin: str, fallback_url: str) -> ScrapedSeries:
             asin = r_item["asin"]
             p = products_by_asin.get(asin, {})
             pos = _parse_sequence(r_item.get("sequence"))
-            sort_val = _parse_sequence(r_item.get("sort"))
             title = p.get("title") or asin
             norm = _norm_title_for_group(title, series_name)
-            fmt = _classify_edition(p)
 
             if pos is not None:
                 slot_key = ("pos", pos)
-                if slot_key in slots:
-                    existing_items = slots[slot_key]
-                    all_standard = fmt == "standard" and all(_classify_edition(ep) == "standard" for _, ep in existing_items)
-                    titles_match = any(norm == _norm_title_for_group(ep.get("title") or "", series_name) for _, ep in existing_items)
-                    # If two items have the same sequence but both are standard editions with completely
-                    # different titles and distinct sort values, separate them into their sort slot
-                    if all_standard and not titles_match and sort_val is not None and sort_val != pos:
-                        slot_key = ("pos", sort_val)
             else:
                 slot_key = ("title", norm)
 
@@ -317,10 +313,11 @@ def fetch_series_via_api(series_asin: str, fallback_url: str) -> ScrapedSeries:
         for slot_key, group in slots.items():
             def _candidate_rank(item):
                 rel, prod = item
-                sku = prod.get("sku") or ""
+                sku = prod.get("sku") or rel.get("sku") or ""
+                is_placeholder = sku.startswith("PL_HLDR") or prod.get("release_date") == "2200-01-01"
                 f = _classify_edition(prod)
                 return (
-                    sku.startswith("PL_HLDR"),
+                    is_placeholder,
                     not _is_us_edition(prod),
                     f == "box_set",
                     f in ("dramatized", "booktrack", "abridged"),
