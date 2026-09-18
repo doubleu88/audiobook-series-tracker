@@ -158,11 +158,6 @@ def _classify_edition(prod: dict) -> str:
     return "standard"
 
 
-def _is_specialty_edition(prod: dict) -> bool:
-    fmt = _classify_edition(prod)
-    return fmt in ("booktrack", "dramatized", "abridged", "box_set")
-
-
 def _parse_omnibus_range(*texts: str | None) -> tuple[float, float] | None:
     for text in texts:
         if not text:
