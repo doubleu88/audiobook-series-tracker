@@ -95,10 +95,35 @@ class Book(Base):
     ics_sequence: Mapped[int] = mapped_column(Integer, default=1)
 
     series: Mapped["Series"] = relationship(back_populates="books")
+    editions: Mapped[list["BookEdition"]] = relationship(
+        back_populates="book",
+        cascade="all, delete-orphan",
+        order_by="desc(BookEdition.is_primary), BookEdition.id",
+    )
 
     @property
     def released(self) -> bool:
         return self.release_date is not None and self.release_date <= datetime.date.today()
+
+
+class BookEdition(Base):
+    """An individual Audible release or edition associated with a series book slot.
+    A single series position (e.g. Book 1) can have multiple editions: US release,
+    UK release, GraphicAudio/dramatization, Booktrack, or omnibus/box set."""
+
+    __tablename__ = "book_editions"
+    __table_args__ = (UniqueConstraint("book_id", "asin"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), index=True)
+    asin: Mapped[str] = mapped_column(String, index=True)
+    title: Mapped[str | None] = mapped_column(String, nullable=True)
+    sku: Mapped[str | None] = mapped_column(String, nullable=True)
+    format_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=datetime.datetime.utcnow)
+
+    book: Mapped["Book"] = relationship(back_populates="editions")
 
 
 class UserBookStatus(Base):
@@ -115,6 +140,7 @@ class UserBookStatus(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     book_id: Mapped[int] = mapped_column(ForeignKey("books.id"), index=True)
     in_library: Mapped[bool] = mapped_column(Boolean, default=False)
+    matched_asin: Mapped[str | None] = mapped_column(String, nullable=True)
     checked_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
     requested_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
     last_error: Mapped[str | None] = mapped_column(String, nullable=True)

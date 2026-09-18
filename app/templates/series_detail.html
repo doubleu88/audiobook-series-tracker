@@ -121,6 +121,28 @@
           </td>
           <td>
             <a href="{{ entry.book.url }}" target="_blank" rel="noopener">{{ entry.book.title }}</a>
+            {% if entry.book.editions and entry.book.editions|length > 1 %}
+              <details class="editions-details" style="font-size: 0.8rem; margin-top: 0.25rem;">
+                <summary style="cursor: pointer; color: var(--text-muted, #888);">
+                  {{ entry.book.editions|length }} editions
+                </summary>
+                <ul style="margin: 0.25rem 0 0 1rem; padding: 0; list-style: disc;">
+                  {% for ed in entry.book.editions %}
+                    <li>
+                      <a href="https://www.audible.com/pd/{{ ed.asin }}" target="_blank" rel="noopener">
+                        {{ ed.title or ed.asin }}
+                      </a>
+                      {% if ed.format_type and ed.format_type != 'standard' %}
+                        <span class="badge" style="font-size: 0.7rem; padding: 0.1rem 0.3rem;">{{ ed.format_type|replace('_', ' ')|title }}</span>
+                      {% endif %}
+                      {% if ed.is_primary %}
+                        <span class="meta-muted" style="font-size: 0.7rem;">(primary)</span>
+                      {% endif %}
+                    </li>
+                  {% endfor %}
+                </ul>
+              </details>
+            {% endif %}
           </td>
           <td class="cell-nowrap">
             {% if entry.book.release_date %}
@@ -133,7 +155,10 @@
           {% if abs_connected %}
           <td class="cell-nowrap">
             {% if entry.status and entry.status.in_library %}
-              <span class="badge badge-library">✅ In library</span>
+              <span class="badge badge-library" title="Matched in library{% if entry.status.matched_asin %}: {{ entry.status.matched_asin }}{% endif %}">✅ In library</span>
+              {% if entry.matched_edition and not entry.matched_edition.is_primary %}
+                <br><span class="meta-muted" style="font-size: 0.75rem;">({{ entry.matched_edition.format_type|replace('_', ' ')|title if entry.matched_edition.format_type else 'Alternate' }})</span>
+              {% endif %}
             {% elif not entry.book.released %}
               <span class="meta-muted">&mdash;</span>
             {% elif entry.status and entry.status.checked_at is not none %}
