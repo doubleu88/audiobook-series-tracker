@@ -161,13 +161,31 @@ def _is_specialty_edition(prod: dict) -> bool:
     return fmt in ("booktrack", "dramatized", "abridged", "box_set")
 
 
-def _parse_omnibus_range(title: str) -> tuple[float, float] | None:
-    m = re.search(r"books?\s*(\d+(?:\.\d+)?)\s*[-–—to]+\s*(\d+(?:\.\d+)?)", title, re.IGNORECASE)
-    if m:
-        try:
-            return float(m.group(1)), float(m.group(2))
-        except ValueError:
-            return None
+def _parse_omnibus_range(*texts: str | None) -> tuple[float, float] | None:
+    for text in texts:
+        if not text:
+            continue
+        # 1. Direct sequence range like '1-3'
+        m1 = re.match(r"^(\d+(?:\.\d+)?)\s*[-–—to]\s*(\d+(?:\.\d+)?)$", str(text).strip(), re.IGNORECASE)
+        if m1:
+            try:
+                return float(m1.group(1)), float(m1.group(2))
+            except ValueError:
+                pass
+        # 2. 'books 1-3' or 'books 1 to 3'
+        m2 = re.search(r"books?\s*(\d+(?:\.\d+)?)\s*[-–—to]+\s*(\d+(?:\.\d+)?)", str(text), re.IGNORECASE)
+        if m2:
+            try:
+                return float(m2.group(1)), float(m2.group(2))
+            except ValueError:
+                pass
+        # 3. 'Book 1, 2, 3'
+        m3 = re.search(r"books?\s*(\d+)(?:\s*,\s*\d+)*\s*,\s*(?:and\s*)?(\d+)", str(text), re.IGNORECASE)
+        if m3:
+            try:
+                return float(m3.group(1)), float(m3.group(2))
+            except ValueError:
+                pass
     return None
 
 
@@ -268,17 +286,32 @@ def fetch_series_via_api(series_asin: str, fallback_url: str) -> ScrapedSeries:
             slots.setdefault(slot_key, []).append((r_item, p))
 
         # Check for omnibus / box sets that span multiple positions and attach to covered slots
+        omnibus_asins_absorbed = set()
         for r_item in series_rels:
             asin = r_item["asin"]
             p = products_by_asin.get(asin, {})
-            title = p.get("title") or ""
-            rng = _parse_omnibus_range(title)
+            rng = _parse_omnibus_range(r_item.get("sequence"), p.get("title"), p.get("subtitle"))
             if rng:
                 start, end = rng
-                for slot_key, items in slots.items():
-                    if slot_key[0] == "pos" and start <= slot_key[1] <= end:
+                covered_slots = [
+                    slot_key for slot_key in slots.keys()
+                    if slot_key[0] == "pos" and start <= slot_key[1] <= end
+                ]
+                if covered_slots:
+                    omnibus_asins_absorbed.add(asin)
+                    for slot_key in covered_slots:
+                        items = slots[slot_key]
                         if not any(it_r["asin"] == asin for it_r, _ in items):
                             items.append((r_item, p))
+
+        # Remove standalone unnumbered slots that were just absorbed omnibuses
+        if omnibus_asins_absorbed:
+            to_delete = [
+                slot_key for slot_key, items in slots.items()
+                if slot_key[0] == "title" and len(items) == 1 and items[0][0]["asin"] in omnibus_asins_absorbed
+            ]
+            for k in to_delete:
+                del slots[k]
 
         books: list[ScrapedBook] = []
         for slot_key, group in slots.items():
