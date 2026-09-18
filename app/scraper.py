@@ -168,25 +168,31 @@ def _parse_omnibus_range(*texts: str | None) -> tuple[float, float] | None:
         if not text:
             continue
         s = str(text).strip()
-        # 1. Direct sequence range like '1-3', '1 - 3', '1 to 3'
-        m1 = re.match(r"^(\d+(?:\.\d+)?)\s*(?:[-–—]|\bto\b)\s*(\d+(?:\.\d+)?)$", s, re.IGNORECASE)
+        # 1. 'books 1-3' or 'books 1 to 3'
+        m1 = re.search(r"books?\s*(\d+(?:\.\d+)?)\s*(?:[-–—]|\bto\b)\s*(\d+(?:\.\d+)?)", s, re.IGNORECASE)
         if m1:
             try:
-                return float(m1.group(1)), float(m1.group(2))
+                st, en = float(m1.group(1)), float(m1.group(2))
+                if st < en:
+                    return st, en
             except ValueError:
                 pass
-        # 2. 'books 1-3' or 'books 1 to 3'
-        m2 = re.search(r"books?\s*(\d+(?:\.\d+)?)\s*(?:[-–—]|\bto\b)\s*(\d+(?:\.\d+)?)", s, re.IGNORECASE)
+        # 2. Direct sequence range like '1-3', '1 - 3', '1 to 3', '1-3 (Omnibus)'
+        m2 = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:[-–—]|\bto\b)\s*(\d+(?:\.\d+)?)\b", s, re.IGNORECASE)
         if m2:
             try:
-                return float(m2.group(1)), float(m2.group(2))
+                st, en = float(m2.group(1)), float(m2.group(2))
+                if st < en and (en - st) >= 1:
+                    return st, en
             except ValueError:
                 pass
-        # 3. 'Book 1, 2, 3' or 'Books 1, 2 and 3'
-        m3 = re.search(r"books?\s*(\d+)(?:\s*,\s*\d+)*\s*(?:,|and|\s)+\s*(\d+)", s, re.IGNORECASE)
+        # 3. 'Book 1, 2, 3' or 'Books 1, 2 and 3' or sequence '1, 2, 3'
+        m3 = re.search(r"(?:books?\s*)?(\d+)(?:\s*,\s*\d+)+\s*(?:,|and|\s)+\s*(\d+)", s, re.IGNORECASE)
         if m3:
             try:
-                return float(m3.group(1)), float(m3.group(2))
+                st, en = float(m3.group(1)), float(m3.group(2))
+                if st < en:
+                    return st, en
             except ValueError:
                 pass
     return None
@@ -196,13 +202,14 @@ def _parse_sequence(seq_str: str | None) -> float | None:
     if not seq_str:
         return None
     s = str(seq_str).strip()
-    if any(sep in s for sep in ("-", "–", "—", " to ", ",")):
+    if _parse_omnibus_range(s):
         return None
+    s_clean = re.sub(r"^(?:book|volume|episode|part|#)\s*", "", s, flags=re.IGNORECASE).strip()
     try:
-        return float(s)
+        return float(s_clean)
     except ValueError:
         pass
-    m = re.match(r"^(\d+(?:\.\d+)?)", s)
+    m = re.match(r"^(\d+(?:\.\d+)?)", s_clean)
     if m:
         try:
             return float(m.group(1))
