@@ -89,6 +89,7 @@ class SeriesSearchResult:
     url: str
     author: str | None
     sample_title: str
+    book_count: int | None = None
 
 
 def extract_series_asin(url_or_asin: str) -> str:
@@ -318,13 +319,59 @@ def search_series(query: str) -> list[SeriesSearchResult]:
         if series_asin in results:
             continue
 
-        author_link = item.select_one('a[href*="/author/"]')
+        author = None
+        author_item = item.select_one("li.authorLabel")
+        if author_item:
+            author_text = author_item.get_text(" ", strip=True)
+            author = re.sub(r"^By:\s*", "", author_text)
+            author = re.sub(r"\s*,\s*", ", ", author).strip()
+        elif item.select_one('a[href*="/author/"]'):
+            author = item.select_one('a[href*="/author/"]').get_text(strip=True)
+
         results[series_asin] = SeriesSearchResult(
             asin=series_asin,
             name=_name_from_slug(slug),
             url=f"https://www.audible.com{href}",
-            author=author_link.get_text(strip=True) if author_link else None,
+            author=author,
             sample_title=item.get("aria-label", "").strip(),
         )
+
+    if results:
+        asins_str = ",".join(results.keys())
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.get(
+                    "https://api.audible.com/1.0/catalog/products",
+                    params={
+                        "asins": asins_str,
+                        "response_groups": "relationships,product_desc,contributors",
+                    },
+                    headers={"User-Agent": USER_AGENT},
+                )
+                if resp.status_code == 200:
+                    for p in resp.json().get("products", []):
+                        p_asin = p.get("asin")
+                        if p_asin in results:
+                            if p.get("title"):
+                                results[p_asin].name = p.get("title")
+                            rels = [
+                                r
+                                for r in p.get("relationships", [])
+                                if r.get("relationship_type") == "series"
+                            ]
+                            if rels:
+                                results[p_asin].book_count = len(rels)
+                            authors = [
+                                a.get("name")
+                                for a in p.get("authors", [])
+                                if a.get("name")
+                            ]
+                            if authors:
+                                results[p_asin].author = ", ".join(authors)
+        except Exception as exc:
+            logger.warning(
+                "Failed to prefetch series metadata for search results: %s",
+                exc,
+            )
 
     return list(results.values())
