@@ -965,11 +965,18 @@ def series_detail(
                 diff_days = (b.release_date - today).days
                 rel = humanize_relative(diff_days)
 
+            matched_edition = None
+            if st and st.in_library and st.matched_asin:
+                matched_edition = next(
+                    (ed for ed in b.editions if ed.asin == st.matched_asin), None
+                )
+
             book_entries.append(
                 {
                     "book": b,
                     "status": st,
                     "relative": rel,
+                    "matched_edition": matched_edition,
                 }
             )
 

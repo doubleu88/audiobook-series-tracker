@@ -35,8 +35,15 @@
       {% for result in results %}
       <tr>
         <td>
-          <a href="{{ result.url }}" target="_blank" rel="noopener" class="series-name-cell">{{ result.name }}</a><br>
-          <span class="meta-muted">e.g. {{ result.sample_title }}</span>
+          <a href="{{ result.url }}" target="_blank" rel="noopener" class="series-name-cell">{{ result.name }}</a>
+          {% if result.book_count %}
+            <span class="meta-muted" style="margin-left: 0.35rem; font-size: 0.85em;">({{ result.book_count }} book{{ "s" if result.book_count != 1 }})</span>
+          {% endif %}
+          <br>
+          <span class="meta-muted">
+            e.g. {{ result.sample_title }} &middot;
+            <a href="{{ result.url }}" target="_blank" rel="noopener">View on Audible ↗</a>
+          </span>
         </td>
         <td>{{ result.author or "—" }}</td>
         <td>
