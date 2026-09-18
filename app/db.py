@@ -73,6 +73,22 @@ def _migrate(conn) -> None:
             conn.execute(text("ALTER TABLE user_book_status ADD COLUMN acknowledged BOOLEAN DEFAULT 0"))
         if "acknowledged_at" not in ubs_columns:
             conn.execute(text("ALTER TABLE user_book_status ADD COLUMN acknowledged_at DATETIME"))
+        if "matched_asin" not in ubs_columns:
+            conn.execute(text("ALTER TABLE user_book_status ADD COLUMN matched_asin VARCHAR"))
+
+    if "book_editions" in inspect(conn).get_table_names():
+        be_columns = {col["name"] for col in inspect(conn).get_columns("book_editions")}
+        if "sku" not in be_columns:
+            conn.execute(text("ALTER TABLE book_editions ADD COLUMN sku VARCHAR"))
+        if "format_type" not in be_columns:
+            conn.execute(text("ALTER TABLE book_editions ADD COLUMN format_type VARCHAR"))
+        # Seed existing books as primary editions if table is empty
+        edition_count = conn.execute(text("SELECT COUNT(*) FROM book_editions")).scalar()
+        if edition_count == 0:
+            conn.execute(text(
+                "INSERT OR IGNORE INTO book_editions (book_id, asin, title, is_primary, created_at) "
+                "SELECT id, asin, title, 1, CURRENT_TIMESTAMP FROM books WHERE asin IS NOT NULL"
+            ))
 
     if "users" in inspect(conn).get_table_names():
         has_admin = conn.execute(text("SELECT 1 FROM users WHERE is_admin = 1 LIMIT 1")).first()

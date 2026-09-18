@@ -9,7 +9,7 @@ import logging
 import re
 import subprocess
 import urllib.parse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from bs4 import BeautifulSoup
 import httpx
@@ -65,6 +65,15 @@ def _curl_get(url: str, params: dict[str, str] | None = None) -> str:
 
 
 @dataclass
+class ScrapedEdition:
+    asin: str
+    title: str
+    sku: str | None = None
+    format_type: str | None = None
+    is_primary: bool = False
+
+
+@dataclass
 class ScrapedBook:
     asin: str
     title: str
@@ -72,6 +81,7 @@ class ScrapedBook:
     release_date: datetime.date | None
     url: str
     image_url: str | None
+    editions: list[ScrapedEdition] = field(default_factory=list)
 
 
 @dataclass
@@ -131,9 +141,34 @@ def _is_us_edition(prod: dict) -> bool:
     return True
 
 
-def _is_specialty_edition(prod: dict) -> bool:
+def _classify_edition(prod: dict) -> str:
     title = (prod.get("title") or "").lower()
-    return any(term in title for term in ("booktrack", "dramatized", "graphicaudio", "abridged", "soundtrack"))
+    if any(term in title for term in ("dramatized", "graphicaudio", "graphic audio", "soundtrack")):
+        return "dramatized"
+    if "booktrack" in title:
+        return "booktrack"
+    if any(term in title for term in ("box set", "boxed set", "omnibus", "collection")) or re.search(r"books?\s*\d+\s*[-–—to]+\s*\d+", title):
+        return "box_set"
+    if "abridged" in title and "unabridged" not in title:
+        return "abridged"
+    if not _is_us_edition(prod):
+        return "foreign"
+    return "standard"
+
+
+def _is_specialty_edition(prod: dict) -> bool:
+    fmt = _classify_edition(prod)
+    return fmt in ("booktrack", "dramatized", "abridged", "box_set")
+
+
+def _parse_omnibus_range(title: str) -> tuple[float, float] | None:
+    m = re.search(r"books?\s*(\d+(?:\.\d+)?)\s*[-–—to]+\s*(\d+(?:\.\d+)?)", title, re.IGNORECASE)
+    if m:
+        try:
+            return float(m.group(1)), float(m.group(2))
+        except ValueError:
+            return None
+    return None
 
 
 def _parse_sequence(seq_str: str | None) -> float | None:
@@ -152,9 +187,17 @@ def _parse_sequence(seq_str: str | None) -> float | None:
     return None
 
 
-def _norm_title_for_group(title: str) -> str:
-    t = title.split(":")[0].split("—")[0].strip().lower()
-    return re.sub(r"[^a-z0-9]", "", t)
+def _norm_title_for_group(title: str, series_name: str = "") -> str:
+    # 1. Strip bracketed / parenthetical expressions (e.g. (Dramatized Adaptation), [Booktrack Edition])
+    t = re.sub(r"[\(\[\{].*?[\)\]\}]", "", title)
+    # 2. Strip leading series name prefix (e.g. "Warlock Holmes: The Finality Problem" -> "The Finality Problem")
+    if series_name:
+        s_pat = re.escape(series_name.strip()) + r"[:\s—\-]+"
+        t = re.sub(f"^{s_pat}", "", t, flags=re.IGNORECASE)
+    # 3. Strip subtitles after colon, em-dash, or hyphen-space
+    t = t.split(":")[0].split("—")[0].split(" - ")[0].strip().lower()
+    cleaned = re.sub(r"[^a-z0-9]", "", t)
+    return cleaned or re.sub(r"[^a-z0-9]", "", title.lower())
 
 
 def fetch_series_via_api(series_asin: str, fallback_url: str) -> ScrapedSeries:
@@ -196,30 +239,66 @@ def fetch_series_via_api(series_asin: str, fallback_url: str) -> ScrapedSeries:
                 except Exception as chunk_exc:
                     logger.warning("Error fetching product chunk for series %s: %s", series_asin, chunk_exc)
 
-        candidates_by_group: dict[tuple, list[tuple[dict, dict]]] = {}
-        for r in series_rels:
-            asin = r["asin"]
+        # Group candidate child products into series slots.
+        # A slot represents a single book entry / position in the series, which can hold
+        # multiple editions (e.g. US edition, UK edition, GraphicAudio, Booktrack).
+        slots: dict[tuple, list[tuple[dict, dict]]] = {}
+        for r_item in series_rels:
+            asin = r_item["asin"]
             p = products_by_asin.get(asin, {})
-            title = (p.get("title") or asin).strip()
-            pos = _parse_sequence(r.get("sequence"))
-            norm = _norm_title_for_group(title)
-            key = (pos, norm) if pos is not None else (None, asin)
-            candidates_by_group.setdefault(key, []).append((r, p))
+            pos = _parse_sequence(r_item.get("sequence"))
+            sort_val = _parse_sequence(r_item.get("sort"))
+            title = p.get("title") or asin
+            norm = _norm_title_for_group(title, series_name)
+            fmt = _classify_edition(p)
+
+            if pos is not None:
+                slot_key = ("pos", pos)
+                if slot_key in slots:
+                    existing_items = slots[slot_key]
+                    all_standard = fmt == "standard" and all(_classify_edition(ep) == "standard" for _, ep in existing_items)
+                    titles_match = any(norm == _norm_title_for_group(ep.get("title") or "", series_name) for _, ep in existing_items)
+                    # If two items have the same sequence but both are standard editions with completely
+                    # different titles and distinct sort values, separate them into their sort slot
+                    if all_standard and not titles_match and sort_val is not None and sort_val != pos:
+                        slot_key = ("pos", sort_val)
+            else:
+                slot_key = ("title", norm)
+
+            slots.setdefault(slot_key, []).append((r_item, p))
+
+        # Check for omnibus / box sets that span multiple positions and attach to covered slots
+        for r_item in series_rels:
+            asin = r_item["asin"]
+            p = products_by_asin.get(asin, {})
+            title = p.get("title") or ""
+            rng = _parse_omnibus_range(title)
+            if rng:
+                start, end = rng
+                for slot_key, items in slots.items():
+                    if slot_key[0] == "pos" and start <= slot_key[1] <= end:
+                        if not any(it_r["asin"] == asin for it_r, _ in items):
+                            items.append((r_item, p))
 
         books: list[ScrapedBook] = []
-        for (pos, norm), group in candidates_by_group.items():
-            group.sort(
-                key=lambda item: (
-                    (item[1].get("sku") or "").startswith("PL_HLDR"),
-                    not _is_us_edition(item[1]),
-                    _is_specialty_edition(item[1]),
-                    item[0]["asin"],
+        for slot_key, group in slots.items():
+            def _candidate_rank(item):
+                rel, prod = item
+                sku = prod.get("sku") or ""
+                f = _classify_edition(prod)
+                return (
+                    sku.startswith("PL_HLDR"),
+                    not _is_us_edition(prod),
+                    f == "box_set",
+                    f in ("dramatized", "booktrack", "abridged"),
+                    rel["asin"],
                 )
-            )
+
+            group.sort(key=_candidate_rank)
             best_rel, best_prod = group[0]
             asin = best_rel["asin"]
             title = best_prod.get("title") or asin
-            position = _parse_sequence(best_rel.get("sequence"))
+            position = slot_key[1] if slot_key[0] == "pos" else _parse_sequence(best_rel.get("sequence"))
             sku = best_prod.get("sku") or ""
             raw_date = best_prod.get("release_date")
 
@@ -239,6 +318,22 @@ def fetch_series_via_api(series_asin: str, fallback_url: str) -> ScrapedSeries:
             images = best_prod.get("product_images", {}) or {}
             image_url = images.get("500") or images.get("120")
 
+            editions = []
+            seen_edition_asins = set()
+            for idx, (item_rel, item_prod) in enumerate(group):
+                ed_asin = item_rel["asin"]
+                if ed_asin not in seen_edition_asins:
+                    seen_edition_asins.add(ed_asin)
+                    editions.append(
+                        ScrapedEdition(
+                            asin=ed_asin,
+                            title=item_prod.get("title") or ed_asin,
+                            sku=item_prod.get("sku"),
+                            format_type=_classify_edition(item_prod),
+                            is_primary=(idx == 0),
+                        )
+                    )
+
             books.append(
                 ScrapedBook(
                     asin=asin,
@@ -247,6 +342,7 @@ def fetch_series_via_api(series_asin: str, fallback_url: str) -> ScrapedSeries:
                     release_date=release_date,
                     url=book_url,
                     image_url=image_url,
+                    editions=editions,
                 )
             )
 
