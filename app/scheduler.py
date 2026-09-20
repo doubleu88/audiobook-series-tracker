@@ -83,15 +83,11 @@ def update_series_from_scraped(session, series: Series, scraped: ScrapedSeries) 
     is_first_scrape = series.last_checked is None
     series_name_changed = series.name != scraped.name
     existing_by_asin = {book.asin: book for book in series.books if book.asin}
-    existing_by_edition_asin = {
-        ed.asin: book
-        for book in series.books
-        for ed in book.editions
-        if ed.asin
-    }
-    existing_by_pos = {
-        book.position: book for book in series.books if book.position is not None
-    }
+    existing_by_edition_asin: dict[str, list[Book]] = {}
+    for book in series.books:
+        for ed in book.editions:
+            if ed.asin and ed.format_type != "box_set":
+                existing_by_edition_asin.setdefault(ed.asin, []).append(book)
     existing_by_title = {
         book.title.lower().strip(): book for book in series.books if book.title
     }
@@ -109,15 +105,23 @@ def update_series_from_scraped(session, series: Series, scraped: ScrapedSeries) 
         book = existing_by_asin.get(scraped_book.asin)
         if book is not None and book.id in matched_book_ids:
             book = None
-        if book is None and scraped_book.editions:
-            for ed in scraped_book.editions:
-                cand = existing_by_asin.get(ed.asin) or existing_by_edition_asin.get(ed.asin)
-                if cand is not None and cand.id not in matched_book_ids:
-                    book = cand
-                    break
         if book is None and scraped_book.position is not None:
-            cand = existing_by_pos.get(scraped_book.position)
-            if cand is not None and cand.id not in matched_book_ids:
+            cand_books = [
+                b
+                for b in series.books
+                if b.position == scraped_book.position and b.id not in matched_book_ids
+            ]
+            if len(cand_books) > 1 and scraped_book.title:
+                norm_s = _norm_title_for_group(scraped_book.title, series.name)
+                cand = next(
+                    (b for b in cand_books if _norm_title_for_group(b.title, series.name) == norm_s),
+                    cand_books[0],
+                )
+            elif cand_books:
+                cand = cand_books[0]
+            else:
+                cand = None
+            if cand is not None:
                 book = cand
         if (
             book is None
@@ -132,6 +136,21 @@ def update_series_from_scraped(session, series: Series, scraped: ScrapedSeries) 
             cand = existing_by_norm_title.get(norm_scraped)
             if cand is not None and cand.id not in matched_book_ids:
                 book = cand
+        if book is None and scraped_book.editions:
+            for ed in scraped_book.editions:
+                if ed.format_type == "box_set":
+                    continue
+                cands = []
+                if ed.asin in existing_by_asin:
+                    cands.append(existing_by_asin[ed.asin])
+                if ed.asin in existing_by_edition_asin:
+                    cands.extend(existing_by_edition_asin[ed.asin])
+                for cand in cands:
+                    if cand.id not in matched_book_ids:
+                        book = cand
+                        break
+                if book is not None:
+                    break
 
         if book is not None and book.asin != scraped_book.asin:
             logger.info(
@@ -242,7 +261,30 @@ def update_series_from_scraped(session, series: Series, scraped: ScrapedSeries) 
     for b in active_books_by_id.values():
         if b.asin:
             active_editions_map[b.asin] = b
-    for ed in session.query(BookEdition).filter(BookEdition.book_id.in_(matched_book_ids)).all():
+    # First map box_set editions (lowest position wins)
+    for ed in (
+        session.query(BookEdition)
+        .filter(BookEdition.book_id.in_(matched_book_ids), BookEdition.format_type == "box_set")
+        .all()
+    ):
+        b = active_books_by_id.get(ed.book_id)
+        if ed.asin and b and (
+            ed.asin not in active_editions_map
+            or (
+                b.position is not None
+                and (
+                    active_editions_map[ed.asin].position is None
+                    or b.position < active_editions_map[ed.asin].position
+                )
+            )
+        ):
+            active_editions_map[ed.asin] = b
+    # Next map non-boxset editions so they take precedence over box sets
+    for ed in (
+        session.query(BookEdition)
+        .filter(BookEdition.book_id.in_(matched_book_ids), BookEdition.format_type != "box_set")
+        .all()
+    ):
         if ed.asin and ed.book_id in active_books_by_id:
             active_editions_map[ed.asin] = active_books_by_id[ed.book_id]
 
@@ -282,6 +324,9 @@ def update_series_from_scraped(session, series: Series, scraped: ScrapedSeries) 
                         book_id=target_book.id,
                         in_library=st.in_library,
                         matched_asin=st.matched_asin or existing.asin,
+                        checked_at=st.checked_at,
+                        requested_at=st.requested_at,
+                        last_error=st.last_error,
                         acknowledged=st.acknowledged,
                         acknowledged_at=st.acknowledged_at,
                     )
@@ -294,6 +339,15 @@ def update_series_from_scraped(session, series: Series, scraped: ScrapedSeries) 
                     if st.acknowledged:
                         target_st.acknowledged = True
                         target_st.acknowledged_at = target_st.acknowledged_at or st.acknowledged_at
+                    if st.requested_at:
+                        if not target_st.requested_at or st.requested_at > target_st.requested_at:
+                            target_st.requested_at = st.requested_at
+                            target_st.last_error = st.last_error
+                    elif st.last_error and not target_st.last_error:
+                        target_st.last_error = st.last_error
+                    if st.checked_at:
+                        if not target_st.checked_at or st.checked_at > target_st.checked_at:
+                            target_st.checked_at = st.checked_at
                 session.delete(st)
 
             session.delete(existing)
