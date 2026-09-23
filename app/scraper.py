@@ -8,6 +8,7 @@ import datetime
 import logging
 import re
 import subprocess
+import time
 import urllib.parse
 from dataclasses import dataclass, field
 
@@ -250,20 +251,39 @@ def fetch_series_via_api(series_asin: str, fallback_url: str) -> ScrapedSeries:
             products_by_asin: dict[str, dict] = {}
             for i in range(0, len(child_asins), 50):
                 chunk = child_asins[i : i + 50]
-                try:
-                    p_resp = client.get(
-                        "https://api.audible.com/1.0/catalog/products",
-                        params={
-                            "asins": ",".join(chunk),
-                            "response_groups": "product_attrs,product_desc,contributors,media,sku,rights",
-                        },
-                        headers=headers,
+                chunk_products = None
+                last_err = None
+                for attempt in range(3):
+                    try:
+                        p_resp = client.get(
+                            "https://api.audible.com/1.0/catalog/products",
+                            params={
+                                "asins": ",".join(chunk),
+                                "response_groups": "product_attrs,product_desc,contributors,media,sku,rights",
+                            },
+                            headers=headers,
+                        )
+                        if p_resp.status_code == 200:
+                            chunk_products = p_resp.json().get("products", [])
+                            break
+                        elif p_resp.status_code in (429, 500, 502, 503, 504) and attempt < 2:
+                            time.sleep(1 * (attempt + 1))
+                            continue
+                        else:
+                            last_err = f"HTTP {p_resp.status_code}"
+                    except Exception as chunk_exc:
+                        last_err = str(chunk_exc)
+                        if attempt < 2:
+                            time.sleep(1 * (attempt + 1))
+                            continue
+
+                if chunk_products is None:
+                    raise SeriesPageError(
+                        f"Failed to fetch product chunk for series {series_asin}: {last_err or 'unknown error'}"
                     )
-                    if p_resp.status_code == 200:
-                        for p in p_resp.json().get("products", []):
-                            products_by_asin[p["asin"]] = p
-                except Exception as chunk_exc:
-                    logger.warning("Error fetching product chunk for series %s: %s", series_asin, chunk_exc)
+
+                for p in chunk_products:
+                    products_by_asin[p["asin"]] = p
 
         # Group candidate child products into series slots.
         # A slot represents a single book entry / position in the series, which can hold
@@ -320,8 +340,8 @@ def fetch_series_via_api(series_asin: str, fallback_url: str) -> ScrapedSeries:
                 f = _classify_edition(prod)
                 return (
                     is_placeholder,
-                    not _is_us_edition(prod),
                     f == "box_set",
+                    not _is_us_edition(prod),
                     f in ("dramatized", "booktrack", "abridged"),
                     rel["asin"],
                 )

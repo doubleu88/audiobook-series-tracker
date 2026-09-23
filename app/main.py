@@ -1049,7 +1049,12 @@ def _require_subscription_for_book(session, user: User, book_id: int) -> Book | 
 
 
 @app.get("/books/{book_id}/download", response_class=HTMLResponse)
-def download_book_form(request: Request, book_id: int, user: User = Depends(get_current_user)):
+def download_book_form(
+    request: Request,
+    book_id: int,
+    query: str | None = None,
+    user: User = Depends(get_current_user),
+):
     session = get_session()
     try:
         book = _require_subscription_for_book(session, user, book_id)
@@ -1060,17 +1065,25 @@ def download_book_form(request: Request, book_id: int, user: User = Depends(get_
         if not (db_user.prowlarr_base_url and db_user.prowlarr_api_key):
             return RedirectResponse("/account/integrations", status_code=303)
 
+        search_query = query.strip() if query and query.strip() else book.title
         error = None
         results = []
         try:
-            results = ProwlarrClient(db_user.prowlarr_base_url, db_user.prowlarr_api_key).search(book.title)
+            results = ProwlarrClient(db_user.prowlarr_base_url, db_user.prowlarr_api_key).search(search_query)
         except ProwlarrError as exc:
             error = str(exc)
-            logger.warning("Prowlarr search failed for user %s, book %r: %s", user.username, book.title, exc)
+            logger.warning("Prowlarr search failed for user %s, query %r: %s", user.username, search_query, exc)
 
         return templates.TemplateResponse(
             "book_download.html",
-            {"request": request, "user": user, "book": book, "results": results, "error": error},
+            {
+                "request": request,
+                "user": user,
+                "book": book,
+                "search_query": search_query,
+                "results": results,
+                "error": error,
+            },
         )
     finally:
         session.close()

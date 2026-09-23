@@ -350,17 +350,16 @@ def update_series_from_scraped(session, series: Series, scraped: ScrapedSeries) 
                             target_st.checked_at = st.checked_at
                 session.delete(st)
 
-            session.delete(existing)
-        elif existing.position is not None:
-            logger.info(
-                "Removing obsolete edition '%s' (%s, id=%s) from series %s",
-                existing.title,
-                existing.asin,
-                existing.id,
-                series.name,
-            )
-            for st in session.query(UserBookStatus).filter_by(book_id=existing.id).all():
-                session.delete(st)
+            # Re-parent any BookEdition records from existing to target_book
+            target_ed_asins = {ed.asin for ed in target_book.editions if ed.asin}
+            for ed in list(existing.editions):
+                existing.editions.remove(ed)
+                if ed.asin and ed.asin not in target_ed_asins:
+                    target_book.editions.append(ed)
+                    target_ed_asins.add(ed.asin)
+                else:
+                    session.delete(ed)
+
             session.delete(existing)
     series.name = scraped.name
     series.last_checked = datetime.datetime.utcnow()
