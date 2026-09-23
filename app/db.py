@@ -26,6 +26,15 @@ def _migrate(conn) -> None:
     if "created_at" not in book_columns:
         conn.execute(text("ALTER TABLE books ADD COLUMN created_at DATETIME"))
         conn.execute(text("UPDATE books SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"))
+    if "updated_at" not in book_columns:
+        conn.execute(text("ALTER TABLE books ADD COLUMN updated_at DATETIME"))
+        # Stamp "now", not created_at. Older feeds put DTSTAMP at request time,
+        # so a revision clock in the past would be older than Google's copy
+        # and the next sync would be discarded.
+        conn.execute(text("UPDATE books SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL"))
+    if "ics_sequence" not in book_columns:
+        conn.execute(text("ALTER TABLE books ADD COLUMN ics_sequence INTEGER DEFAULT 1"))
+        conn.execute(text("UPDATE books SET ics_sequence = 1 WHERE ics_sequence IS NULL OR ics_sequence < 1"))
 
     series_columns = {col["name"] for col in inspect(conn).get_columns("series")}
     if "consecutive_failures" not in series_columns:

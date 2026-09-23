@@ -10,7 +10,6 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Requ
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from icalendar import Calendar, Event
 from pydantic import BaseModel
 from sqlalchemy import and_, func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -25,6 +24,7 @@ from app.auth import (
     require_admin,
     verify_password,
 )
+from app.calendar_feed import calendar_feed_response
 from app.db import get_session, init_db
 from app.logging_config import configure_logging, is_debug_enabled, set_debug_logging
 from app.models import Book, PushSubscription, Series, Subscription, User, UserBookStatus
@@ -268,31 +268,13 @@ def calendar_feed(token: str):
         if user is None:
             raise HTTPException(status_code=404)
 
-        cal = Calendar()
-        cal.add("prodid", "-//Audiobook Series Tracker//")
-        cal.add("version", "2.0")
-        cal.add("x-wr-calname", "Audiobook Releases")
-
         series_list = (
             session.query(Series)
             .join(Subscription)
             .filter(Subscription.user_id == user.id, Subscription.muted.is_(False))
             .all()
         )
-        for series in series_list:
-            for book in series.books:
-                if book.release_date is None:
-                    continue
-                event = Event()
-                event.add("summary", f"{series.name}: {book.title}")
-                event.add("dtstamp", datetime.datetime.now(datetime.timezone.utc))
-                event.add("dtstart", book.release_date)
-                event.add("dtend", book.release_date + datetime.timedelta(days=1))
-                event.add("uid", f"book-{book.id}@audiobook-tracker")
-                event.add("url", book.url)
-                cal.add_component(event)
-
-        return Response(content=bytes(cal.to_ical()), media_type="text/calendar")
+        return calendar_feed_response(series_list)
     finally:
         session.close()
 
