@@ -8,6 +8,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.audiobookshelf import ABSClient, ABSError
+from app.calendar_feed import event_content_changed, mark_calendar_revision
 from app.db import DATA_DIR, get_session
 from app.models import Book, PushSubscription, Series, Subscription, User, UserBookStatus
 from app.push import send_push
@@ -78,7 +79,9 @@ def update_series_from_scraped(session, series: Series, scraped: ScrapedSeries) 
     series.last_failure_reason = None
 
     today = datetime.date.today()
+    now = datetime.datetime.utcnow()
     is_first_scrape = series.last_checked is None
+    series_name_changed = series.name != scraped.name
     existing_by_asin = {book.asin: book for book in series.books}
     new_books: list[Book] = []
     dated_books: list[Book] = []
@@ -89,6 +92,7 @@ def update_series_from_scraped(session, series: Series, scraped: ScrapedSeries) 
         if book is None:
             book = Book(series_id=series.id, asin=scraped_book.asin)
             session.add(book)
+            mark_calendar_revision(book, changed=True, now=now)
             if is_first_scrape:
                 # Already out (today or earlier) at subscribe time — mark it as
                 # accounted for so it doesn't fire a stale "released today" the
@@ -99,24 +103,42 @@ def update_series_from_scraped(session, series: Series, scraped: ScrapedSeries) 
                 released_today.append(book)
             else:
                 new_books.append(book)
-        elif not is_first_scrape and book.release_date is None and scraped_book.release_date is not None:
-            if scraped_book.release_date == today:
+        else:
+            mark_calendar_revision(
+                book,
+                changed=event_content_changed(
+                    book,
+                    series_name_changed=series_name_changed,
+                    title=scraped_book.title,
+                    release_date=scraped_book.release_date,
+                    url=scraped_book.url,
+                ),
+                now=now,
+            )
+            if not is_first_scrape and book.release_date is None and scraped_book.release_date is not None:
+                if scraped_book.release_date == today:
+                    released_today.append(book)
+                else:
+                    dated_books.append(book)
+            elif (
+                not is_first_scrape
+                and book.release_date == today
+                and scraped_book.release_date == today
+                and not book.release_day_notified
+            ):
                 released_today.append(book)
-            else:
-                dated_books.append(book)
-        elif (
-            not is_first_scrape
-            and book.release_date == today
-            and scraped_book.release_date == today
-            and not book.release_day_notified
-        ):
-            released_today.append(book)
 
         book.title = scraped_book.title
         book.position = scraped_book.position
         book.release_date = scraped_book.release_date
         book.url = scraped_book.url
         book.cover_image = scraped_book.image_url
+
+    if series_name_changed:
+        scraped_asins = {scraped_book.asin for scraped_book in scraped.books}
+        for book in series.books:
+            if book.asin not in scraped_asins:
+                mark_calendar_revision(book, changed=True, now=now)
 
     series.name = scraped.name
     series.last_checked = datetime.datetime.utcnow()

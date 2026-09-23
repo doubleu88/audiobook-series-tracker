@@ -155,17 +155,19 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the PR process.
   family/roommates without open signup, but it also means there's no
   self-service password reset — an admin has to delete and recreate an
   account if someone forgets their password.
-- **Google/Apple Calendar subscriptions to the `.ics` feed can take a long
-  time to show events, even right after subscribing.** Both apps poll
-  subscribed-by-URL calendars on their own internal schedule — often
-  12–48 hours — rather than fetching immediately when you add one, and
-  removing/re-adding the same URL doesn't reliably force an early refetch.
-  If you want to confirm the feed itself is fine (or just want events to
-  show up right away), use a one-time **Import** instead of (or in addition
-  to) the live subscription — in Google Calendar: Settings → Import & export
-  → Import, pointing at the downloaded `.ics` file. That parses and loads
-  the events immediately, independent of the subscription's polling
-  schedule.
+- **A subscribed Google or Apple calendar updates on that app's schedule,
+  not the moment a release is scraped.** The feed gives every release a
+  stable id and a revision number, which is what those apps need in order
+  to add newly announced books and to move a date that changed. Google
+  refetches a subscribed URL on its own, typically every 8–24 hours, and
+  has no "refresh now" control; removing and re-adding the same URL does
+  not reliably force an earlier fetch. Apple Calendar usually picks up
+  the feed's one-hour refresh hint sooner. To load the current events
+  immediately, use a one-time **Import** as well as the subscription —
+  in Google Calendar: Settings → Import & export → Import, pointing at
+  the downloaded `.ics` file. The link itself has to be reachable from
+  the public internet over HTTPS; Google's servers fetch it, not your
+  browser.
 - Push notifications use the standard Web Push API (VAPID), the same
   mechanism as any other PWA — no third-party push service or account is
   involved. Each includes the relevant book's cover art as the notification
