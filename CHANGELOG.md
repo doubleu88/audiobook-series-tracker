@@ -5,6 +5,10 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [2.1.0] - 2026-09-25
+
+- Added automated PR review: a Telegram notification fires when a PR opens, and Gemini reads each PR's diff, decides whether it's worth a full review, and posts its verdict as a PR comment — re-running automatically on every subsequent push.
+
 ## [2.0.0] - 2026-09-25
 
 - Replace the series scraper with Audible's series API. This resolves an issue where the scraper was unable to distinguish between UK-only and US-only book releases, which are all listed together on the page for non-signed-in accounts; as a result I was getting many UK editions of books instead of US editions.
