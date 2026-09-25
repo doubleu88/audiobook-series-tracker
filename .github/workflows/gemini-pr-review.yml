@@ -1,0 +1,69 @@
+name: Gemini PR review
+
+# Gemini decides worthiness itself -- there is no human accept/reject gate.
+# On every open/push it reads the diff, decides WORTHY (real review value)
+# vs SKIP (trivial/formatting/lockfile/no-op), and always upserts a single
+# PR comment (found by a hidden marker, edited in place rather than
+# spammed fresh on every push) plus a Telegram notice with the verdict.
+#
+# pull_request_target, not pull_request: same reasoning as
+# changelog-on-merge.yml -- plain `pull_request` forces GITHUB_TOKEN
+# read-only for fork PRs, which would break posting the review comment.
+# This is safe here because the PR's own code is never checked out or
+# executed: the only checkout below is `ref: main` (for this workflow's
+# own scripts), and the diff is fetched via `gh pr diff` and handled as
+# inert text -- sent to the Gemini API as prompt content, never
+# interpolated into a shell command or executed.
+#
+# Deliberately NOT a required status check: a Gemini API hiccup (bad
+# model name, quota, etc.) should surface as a failed workflow run and a
+# "review failed" Telegram note, not block anyone from merging.
+
+"on":
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  GEMINI_MODEL: gemini-3.8-flash
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Run Gemini review
+        id: review
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/gemini_pr_review.py "${{ github.event.pull_request.number }}"
+
+      - name: Send Telegram verdict notification
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python3 scripts/telegram_notify.py "$(cat <<EOF
+          Gemini review of PR #${{ github.event.pull_request.number }}: ${{ steps.review.outputs.verdict }}
+          ${{ steps.review.outputs.summary }}
+          ${{ github.event.pull_request.html_url }}
+          EOF
+          )"
+
+      - name: Send Telegram failure notification
+        if: failure() && steps.review.outcome == 'failure'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python3 scripts/telegram_notify.py "Gemini review of PR #${{ github.event.pull_request.number }} failed to run -- check the workflow logs. ${{ github.event.pull_request.html_url }}"

@@ -1,0 +1,42 @@
+name: Notify Telegram on new PR
+
+# Pure FYI notification -- there is no accept/reject step here. Gemini
+# decides on its own (see gemini-pr-review.yml) whether a PR is worth a
+# full review; this workflow just lets a human know a PR showed up at all.
+#
+# pull_request_target, not pull_request: consistent with the other
+# workflows in this repo (see changelog-on-merge.yml for the full
+# reasoning) -- plain `pull_request` forces GITHUB_TOKEN read-only for
+# fork PRs. This workflow only reads the event payload though (no gh/API
+# calls), so it doesn't actually need write access; kept as
+# pull_request_target anyway for consistency with gemini-pr-review.yml,
+# which does need it.
+
+"on":
+  pull_request_target:
+    types: [opened, reopened]
+    branches: [main]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Send Telegram notification
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python3 scripts/telegram_notify.py "$(cat <<EOF
+          New PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}
+          By ${{ github.event.pull_request.user.login }}
+          ${{ github.event.pull_request.html_url }}
+          EOF
+          )"
