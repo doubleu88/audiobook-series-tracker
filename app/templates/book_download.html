@@ -5,10 +5,33 @@
     <h2>⬇️ Download &ldquo;{{ book.title }}&rdquo;</h2>
   </div>
 
+  <form method="get" action="/books/{{ book.id }}/download" style="display: flex; gap: 0.5rem; margin: 1rem 0; max-width: 600px;">
+    <input type="text" name="query" value="{{ search_query }}" style="flex: 1;" placeholder="Search release..." required>
+    <button class="btn" type="submit">Search</button>
+  </form>
+
+  {% if book.editions and book.editions|length > 1 %}
+  <div style="margin-bottom: 1rem; font-size: 0.85rem;">
+    <span class="meta-muted">Search alternate editions:</span>
+    <ul style="margin: 0.25rem 0 0 1rem; padding: 0; list-style: disc;">
+      {% for ed in book.editions %}
+        {% if ed.title and ed.title != search_query %}
+        <li>
+          <a href="/books/{{ book.id }}/download?query={{ ed.title | urlencode }}">
+            {{ ed.title }}
+            {% if ed.format_type and ed.format_type != 'standard' %}({{ ed.format_type }}){% endif %}
+          </a>
+        </li>
+        {% endif %}
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
 
   {% if not error and not results %}
-  <p class="empty-hint">No releases found on your configured indexers for &ldquo;{{ book.title }}&rdquo;.</p>
+  <p class="empty-hint">No releases found on your configured indexers for &ldquo;{{ search_query }}&rdquo;.</p>
   {% endif %}
 
   {% if results %}

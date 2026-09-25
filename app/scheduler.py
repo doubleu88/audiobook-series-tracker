@@ -10,9 +10,9 @@ from apscheduler.triggers.cron import CronTrigger
 from app.audiobookshelf import ABSClient, ABSError
 from app.calendar_feed import event_content_changed, mark_calendar_revision
 from app.db import DATA_DIR, get_session
-from app.models import Book, PushSubscription, Series, Subscription, User, UserBookStatus
+from app.models import Book, BookEdition, PushSubscription, Series, Subscription, User, UserBookStatus
 from app.push import send_push
-from app.scraper import ScrapedSeries, SeriesPageError, fetch_series
+from app.scraper import ScrapedEdition, ScrapedSeries, SeriesPageError, fetch_series, _norm_title_for_group
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 
@@ -82,21 +82,92 @@ def update_series_from_scraped(session, series: Series, scraped: ScrapedSeries) 
     now = datetime.datetime.utcnow()
     is_first_scrape = series.last_checked is None
     series_name_changed = series.name != scraped.name
-    existing_by_asin = {book.asin: book for book in series.books}
+    existing_by_asin = {book.asin: book for book in series.books if book.asin}
+    existing_by_edition_asin: dict[str, list[Book]] = {}
+    for book in series.books:
+        for ed in book.editions:
+            if ed.asin and ed.format_type != "box_set":
+                existing_by_edition_asin.setdefault(ed.asin, []).append(book)
+    existing_by_title = {
+        book.title.lower().strip(): book for book in series.books if book.title
+    }
+    existing_by_norm_title = {
+        _norm_title_for_group(book.title, series.name): book
+        for book in series.books
+        if book.title
+    }
     new_books: list[Book] = []
     dated_books: list[Book] = []
     released_today: list[Book] = []
+    matched_book_ids: set[int] = set()
 
     for scraped_book in scraped.books:
         book = existing_by_asin.get(scraped_book.asin)
+        if book is not None and book.id in matched_book_ids:
+            book = None
+        if book is None and scraped_book.position is not None:
+            cand_books = [
+                b
+                for b in series.books
+                if b.position == scraped_book.position and b.id not in matched_book_ids
+            ]
+            if len(cand_books) > 1 and scraped_book.title:
+                norm_s = _norm_title_for_group(scraped_book.title, series.name)
+                cand = next(
+                    (b for b in cand_books if _norm_title_for_group(b.title, series.name) == norm_s),
+                    cand_books[0],
+                )
+            elif cand_books:
+                cand = cand_books[0]
+            else:
+                cand = None
+            if cand is not None:
+                book = cand
+        if (
+            book is None
+            and scraped_book.title
+            and scraped_book.title.lower().strip() in existing_by_title
+        ):
+            cand = existing_by_title.get(scraped_book.title.lower().strip())
+            if cand is not None and cand.id not in matched_book_ids:
+                book = cand
+        if book is None and scraped_book.title:
+            norm_scraped = _norm_title_for_group(scraped_book.title, series.name)
+            cand = existing_by_norm_title.get(norm_scraped)
+            if cand is not None and cand.id not in matched_book_ids:
+                book = cand
+        if book is None and scraped_book.editions:
+            for ed in scraped_book.editions:
+                if ed.format_type == "box_set":
+                    continue
+                cands = []
+                if ed.asin in existing_by_asin:
+                    cands.append(existing_by_asin[ed.asin])
+                if ed.asin in existing_by_edition_asin:
+                    cands.extend(existing_by_edition_asin[ed.asin])
+                for cand in cands:
+                    if cand.id not in matched_book_ids:
+                        book = cand
+                        break
+                if book is not None:
+                    break
+
+        if book is not None and book.asin != scraped_book.asin:
+            logger.info(
+                "Updating primary ASIN for series %s book #%s '%s': %s -> %s",
+                series.name,
+                scraped_book.position,
+                scraped_book.title,
+                book.asin,
+                scraped_book.asin,
+            )
+            book.asin = scraped_book.asin
+
         if book is None:
             book = Book(series_id=series.id, asin=scraped_book.asin)
             session.add(book)
             mark_calendar_revision(book, changed=True, now=now)
             if is_first_scrape:
-                # Already out (today or earlier) at subscribe time — mark it as
-                # accounted for so it doesn't fire a stale "released today" the
-                # next time this series is refreshed.
                 if scraped_book.release_date is not None and scraped_book.release_date <= today:
                     book.release_day_notified = True
             elif scraped_book.release_date == today:
@@ -134,12 +205,162 @@ def update_series_from_scraped(session, series: Series, scraped: ScrapedSeries) 
         book.url = scraped_book.url
         book.cover_image = scraped_book.image_url
 
+        session.flush()  # Ensure book.id is populated for newly inserted books
+        matched_book_ids.add(book.id)
+
+        # Synchronize editions for this slot
+        existing_editions = {ed.asin: ed for ed in book.editions}
+        scraped_ed_asins = {ed.asin for ed in scraped_book.editions}
+        if scraped_book.asin not in scraped_ed_asins:
+            scraped_book.editions.insert(
+                0,
+                ScrapedEdition(
+                    asin=scraped_book.asin,
+                    title=scraped_book.title,
+                    format_type="standard",
+                    is_primary=True,
+                ),
+            )
+            scraped_ed_asins.add(scraped_book.asin)
+
+        # Remove stale editions no longer associated with this slot
+        for ed_asin, old_ed in list(existing_editions.items()):
+            if ed_asin not in scraped_ed_asins:
+                session.delete(old_ed)
+                del existing_editions[ed_asin]
+
+        for ed in scraped_book.editions:
+            is_prim = ed.asin == scraped_book.asin
+            if ed.asin in existing_editions:
+                cur_ed = existing_editions[ed.asin]
+                cur_ed.title = ed.title
+                cur_ed.sku = ed.sku
+                cur_ed.format_type = ed.format_type
+                cur_ed.is_primary = is_prim
+            else:
+                new_ed = BookEdition(
+                    book_id=book.id,
+                    asin=ed.asin,
+                    title=ed.title,
+                    sku=ed.sku,
+                    format_type=ed.format_type,
+                    is_primary=is_prim,
+                )
+                session.add(new_ed)
+
     if series_name_changed:
         scraped_asins = {scraped_book.asin for scraped_book in scraped.books}
         for book in series.books:
             if book.asin not in scraped_asins:
                 mark_calendar_revision(book, changed=True, now=now)
 
+    # Clean up and merge duplicate/obsolete book rows that have been absorbed into slots
+    session.flush()
+    active_books_by_id = {b.id: b for b in series.books if b.id in matched_book_ids}
+    active_editions_map: dict[str, Book] = {}
+    for b in active_books_by_id.values():
+        if b.asin:
+            active_editions_map[b.asin] = b
+    # First map box_set editions (lowest position wins)
+    for ed in (
+        session.query(BookEdition)
+        .filter(BookEdition.book_id.in_(matched_book_ids), BookEdition.format_type == "box_set")
+        .all()
+    ):
+        b = active_books_by_id.get(ed.book_id)
+        if ed.asin and b and (
+            ed.asin not in active_editions_map
+            or (
+                b.position is not None
+                and (
+                    active_editions_map[ed.asin].position is None
+                    or b.position < active_editions_map[ed.asin].position
+                )
+            )
+        ):
+            active_editions_map[ed.asin] = b
+    # Next map non-boxset editions so they take precedence over box sets
+    for ed in (
+        session.query(BookEdition)
+        .filter(BookEdition.book_id.in_(matched_book_ids), BookEdition.format_type != "box_set")
+        .all()
+    ):
+        if ed.asin and ed.book_id in active_books_by_id:
+            active_editions_map[ed.asin] = active_books_by_id[ed.book_id]
+
+    for existing in list(series.books):
+        if existing.id in matched_book_ids:
+            continue
+
+        target_book = active_editions_map.get(existing.asin)
+        if target_book is None and existing.position is not None:
+            for b in active_books_by_id.values():
+                if b.position == existing.position:
+                    target_book = b
+                    break
+        if target_book is None and existing.title:
+            norm_ex = _norm_title_for_group(existing.title, series.name)
+            for b in active_books_by_id.values():
+                if _norm_title_for_group(b.title, series.name) == norm_ex:
+                    target_book = b
+                    break
+
+        if target_book is not None and target_book.id != existing.id:
+            logger.info(
+                "Merging duplicate book row '%s' (%s, id=%s) into slot '%s' (%s, id=%s)",
+                existing.title,
+                existing.asin,
+                existing.id,
+                target_book.title,
+                target_book.asin,
+                target_book.id,
+            )
+            # Merge UserBookStatus from existing to target_book
+            for st in session.query(UserBookStatus).filter_by(book_id=existing.id).all():
+                target_st = session.query(UserBookStatus).filter_by(user_id=st.user_id, book_id=target_book.id).first()
+                if target_st is None:
+                    target_st = UserBookStatus(
+                        user_id=st.user_id,
+                        book_id=target_book.id,
+                        in_library=st.in_library,
+                        matched_asin=st.matched_asin or existing.asin,
+                        checked_at=st.checked_at,
+                        requested_at=st.requested_at,
+                        last_error=st.last_error,
+                        acknowledged=st.acknowledged,
+                        acknowledged_at=st.acknowledged_at,
+                    )
+                    session.add(target_st)
+                else:
+                    if st.in_library:
+                        target_st.in_library = True
+                        if not target_st.matched_asin:
+                            target_st.matched_asin = st.matched_asin or existing.asin
+                    if st.acknowledged:
+                        target_st.acknowledged = True
+                        target_st.acknowledged_at = target_st.acknowledged_at or st.acknowledged_at
+                    if st.requested_at:
+                        if not target_st.requested_at or st.requested_at > target_st.requested_at:
+                            target_st.requested_at = st.requested_at
+                            target_st.last_error = st.last_error
+                    elif st.last_error and not target_st.last_error:
+                        target_st.last_error = st.last_error
+                    if st.checked_at:
+                        if not target_st.checked_at or st.checked_at > target_st.checked_at:
+                            target_st.checked_at = st.checked_at
+                session.delete(st)
+
+            # Re-parent any BookEdition records from existing to target_book
+            target_ed_asins = {ed.asin for ed in target_book.editions if ed.asin}
+            for ed in list(existing.editions):
+                existing.editions.remove(ed)
+                if ed.asin and ed.asin not in target_ed_asins:
+                    target_book.editions.append(ed)
+                    target_ed_asins.add(ed.asin)
+                else:
+                    session.delete(ed)
+
+            session.delete(existing)
     series.name = scraped.name
     series.last_checked = datetime.datetime.utcnow()
     session.commit()
@@ -187,6 +408,16 @@ def refresh_series(series_id: int) -> None:
             return
 
         update_series_from_scraped(session, series, scraped)
+        for sub in series.subscriptions:
+            try:
+                reconcile_series_with_cached_asins(session, sub.user_id, series)
+            except Exception:
+                logger.warning(
+                    "Error reconciling series %s for user %s with cached ASINs",
+                    series.id,
+                    sub.user_id,
+                    exc_info=True,
+                )
     finally:
         session.close()
 
@@ -354,11 +585,23 @@ def run_scan_for_user(user_id: int) -> None:
                 continue
             checked_count += 1
             status = statuses.get(book.id)
+
+            slot_asins = {book.asin.upper()} if book.asin else set()
+            for ed in book.editions:
+                if ed.asin:
+                    slot_asins.add(ed.asin.upper())
+
+            matching = slot_asins.intersection(asins)
+            in_library = bool(matching)
+            matched_asin = next(iter(matching)) if in_library else None
+
             if status is not None and status.in_library:
                 already_in_library += 1
                 status.checked_at = now
+                if matched_asin and not status.matched_asin:
+                    status.matched_asin = matched_asin
                 continue  # already confirmed present; a book later removed from ABS won't un-flip here
-            in_library = (book.asin or "").upper() in asins
+
             if in_library:
                 newly_in_library += 1
             else:
@@ -369,6 +612,7 @@ def run_scan_for_user(user_id: int) -> None:
                 session.add(status)
                 statuses[book.id] = status
             status.in_library = in_library
+            status.matched_asin = matched_asin
             status.checked_at = now
         session.commit()
         total_duration = time.time() - t0
@@ -443,29 +687,38 @@ def reconcile_series_with_cached_asins(session, user_id: int, series: Series) ->
         .all()
     }
 
-    matching_books = [
-        b
-        for b in series.books
-        if b.asin and b.asin.upper() in cached and b.id not in existing_in_lib
-    ]
-    if not matching_books:
+    matching_updates: list[tuple[Book, str]] = []
+    for b in series.books:
+        if b.id in existing_in_lib:
+            continue
+        slot_asins = {b.asin.upper()} if b.asin else set()
+        for ed in b.editions:
+            if ed.asin:
+                slot_asins.add(ed.asin.upper())
+        matched = slot_asins.intersection(cached)
+        if matched:
+            matching_updates.append((b, next(iter(matched))))
+
+    if not matching_updates:
         return 0
 
     updated = 0
     try:
-        for book in matching_books:
+        for book, matched_asin in matching_updates:
             stmt = (
                 sqlite_insert(UserBookStatus)
                 .values(
                     user_id=user_id,
                     book_id=book.id,
                     in_library=True,
+                    matched_asin=matched_asin,
                     checked_at=now,
                 )
                 .on_conflict_do_update(
                     index_elements=["user_id", "book_id"],
                     set_={
                         "in_library": True,
+                        "matched_asin": matched_asin,
                         "checked_at": now,
                     },
                 )
