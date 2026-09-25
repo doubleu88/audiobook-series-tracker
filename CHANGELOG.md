@@ -5,6 +5,14 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [2.0.0] - 2026-09-25
+
+- Replace the series scraper with Audible's series API. This resolves an issue where the scraper was unable to distinguish between UK-only and US-only book releases, which are all listed together on the page for non-signed-in accounts; as a result I was getting many UK editions of books instead of US editions.
+
+## [1.16.1] - 2026-09-23
+
+- Fix the calendar feed so Google Calendar and Apple Calendar add newly announced releases after you subscribe, instead of keeping only the first copy of the feed.
+
 ## [1.16.0] - 2026-09-17
 
 - Two changes: a new Series page, replacing the per-series filter in the Watchlist (and also all links to it, allowing me to remove a huge amount of conditional HTML that was really annoying); and a detailed going-over of the workflow involved in adding a new series and then wanting to do various things to check it. I'm especially happy with copying the most recently viewed series row onto the top of the dashboard; so if you click something on a row that interests you, the page will refresh (as always) but you can keep working with that same series.

@@ -10,7 +10,6 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Requ
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from icalendar import Calendar, Event
 from pydantic import BaseModel
 from sqlalchemy import and_, func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -25,6 +24,7 @@ from app.auth import (
     require_admin,
     verify_password,
 )
+from app.calendar_feed import calendar_feed_response
 from app.db import get_session, init_db
 from app.logging_config import configure_logging, is_debug_enabled, set_debug_logging
 from app.models import Book, PushSubscription, Series, Subscription, User, UserBookStatus
@@ -268,31 +268,13 @@ def calendar_feed(token: str):
         if user is None:
             raise HTTPException(status_code=404)
 
-        cal = Calendar()
-        cal.add("prodid", "-//Audiobook Series Tracker//")
-        cal.add("version", "2.0")
-        cal.add("x-wr-calname", "Audiobook Releases")
-
         series_list = (
             session.query(Series)
             .join(Subscription)
             .filter(Subscription.user_id == user.id, Subscription.muted.is_(False))
             .all()
         )
-        for series in series_list:
-            for book in series.books:
-                if book.release_date is None:
-                    continue
-                event = Event()
-                event.add("summary", f"{series.name}: {book.title}")
-                event.add("dtstamp", datetime.datetime.now(datetime.timezone.utc))
-                event.add("dtstart", book.release_date)
-                event.add("dtend", book.release_date + datetime.timedelta(days=1))
-                event.add("uid", f"book-{book.id}@audiobook-tracker")
-                event.add("url", book.url)
-                cal.add_component(event)
-
-        return Response(content=bytes(cal.to_ical()), media_type="text/calendar")
+        return calendar_feed_response(series_list)
     finally:
         session.close()
 
@@ -965,11 +947,18 @@ def series_detail(
                 diff_days = (b.release_date - today).days
                 rel = humanize_relative(diff_days)
 
+            matched_edition = None
+            if st and st.in_library and st.matched_asin:
+                matched_edition = next(
+                    (ed for ed in b.editions if ed.asin == st.matched_asin), None
+                )
+
             book_entries.append(
                 {
                     "book": b,
                     "status": st,
                     "relative": rel,
+                    "matched_edition": matched_edition,
                 }
             )
 
@@ -1060,7 +1049,12 @@ def _require_subscription_for_book(session, user: User, book_id: int) -> Book | 
 
 
 @app.get("/books/{book_id}/download", response_class=HTMLResponse)
-def download_book_form(request: Request, book_id: int, user: User = Depends(get_current_user)):
+def download_book_form(
+    request: Request,
+    book_id: int,
+    query: str | None = None,
+    user: User = Depends(get_current_user),
+):
     session = get_session()
     try:
         book = _require_subscription_for_book(session, user, book_id)
@@ -1071,17 +1065,25 @@ def download_book_form(request: Request, book_id: int, user: User = Depends(get_
         if not (db_user.prowlarr_base_url and db_user.prowlarr_api_key):
             return RedirectResponse("/account/integrations", status_code=303)
 
+        search_query = query.strip() if query and query.strip() else book.title
         error = None
         results = []
         try:
-            results = ProwlarrClient(db_user.prowlarr_base_url, db_user.prowlarr_api_key).search(book.title)
+            results = ProwlarrClient(db_user.prowlarr_base_url, db_user.prowlarr_api_key).search(search_query)
         except ProwlarrError as exc:
             error = str(exc)
-            logger.warning("Prowlarr search failed for user %s, book %r: %s", user.username, book.title, exc)
+            logger.warning("Prowlarr search failed for user %s, query %r: %s", user.username, search_query, exc)
 
         return templates.TemplateResponse(
             "book_download.html",
-            {"request": request, "user": user, "book": book, "results": results, "error": error},
+            {
+                "request": request,
+                "user": user,
+                "book": book,
+                "search_query": search_query,
+                "results": results,
+                "error": error,
+            },
         )
     finally:
         session.close()

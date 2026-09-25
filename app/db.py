@@ -28,6 +28,15 @@ def _migrate(conn) -> None:
     if "created_at" not in book_columns:
         conn.execute(text("ALTER TABLE books ADD COLUMN created_at DATETIME"))
         conn.execute(text("UPDATE books SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"))
+    if "updated_at" not in book_columns:
+        conn.execute(text("ALTER TABLE books ADD COLUMN updated_at DATETIME"))
+        # Stamp "now", not created_at. Older feeds put DTSTAMP at request time,
+        # so a revision clock in the past would be older than Google's copy
+        # and the next sync would be discarded.
+        conn.execute(text("UPDATE books SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL"))
+    if "ics_sequence" not in book_columns:
+        conn.execute(text("ALTER TABLE books ADD COLUMN ics_sequence INTEGER DEFAULT 1"))
+        conn.execute(text("UPDATE books SET ics_sequence = 1 WHERE ics_sequence IS NULL OR ics_sequence < 1"))
 
     series_columns = {col["name"] for col in inspect(conn).get_columns("series")}
     if "consecutive_failures" not in series_columns:
@@ -75,6 +84,22 @@ def _migrate(conn) -> None:
             conn.execute(text("ALTER TABLE user_book_status ADD COLUMN acknowledged BOOLEAN DEFAULT 0"))
         if "acknowledged_at" not in ubs_columns:
             conn.execute(text("ALTER TABLE user_book_status ADD COLUMN acknowledged_at DATETIME"))
+        if "matched_asin" not in ubs_columns:
+            conn.execute(text("ALTER TABLE user_book_status ADD COLUMN matched_asin VARCHAR"))
+
+    if "book_editions" in inspect(conn).get_table_names():
+        be_columns = {col["name"] for col in inspect(conn).get_columns("book_editions")}
+        if "sku" not in be_columns:
+            conn.execute(text("ALTER TABLE book_editions ADD COLUMN sku VARCHAR"))
+        if "format_type" not in be_columns:
+            conn.execute(text("ALTER TABLE book_editions ADD COLUMN format_type VARCHAR"))
+        # Seed existing books as primary editions if table is empty
+        edition_count = conn.execute(text("SELECT COUNT(*) FROM book_editions")).scalar()
+        if edition_count == 0:
+            conn.execute(text(
+                "INSERT OR IGNORE INTO book_editions (book_id, asin, title, is_primary, created_at) "
+                "SELECT id, asin, title, 1, CURRENT_TIMESTAMP FROM books WHERE asin IS NOT NULL"
+            ))
 
     if "users" in inspect(conn).get_table_names():
         has_admin = conn.execute(text("SELECT 1 FROM users WHERE is_admin = 1 LIMIT 1")).first()
