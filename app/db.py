@@ -23,6 +23,11 @@ def _migrate(conn) -> None:
         conn.execute(text("ALTER TABLE books ADD COLUMN cover_image VARCHAR"))
     if "release_day_notified" not in book_columns:
         conn.execute(text("ALTER TABLE books ADD COLUMN release_day_notified BOOLEAN DEFAULT 0"))
+    if "date_announced_notified" not in book_columns:
+        conn.execute(text("ALTER TABLE books ADD COLUMN date_announced_notified BOOLEAN DEFAULT 0"))
+        # Books that already have a date were announced (or predate announcements); don't re-announce.
+        if "release_date" in book_columns:
+            conn.execute(text("UPDATE books SET date_announced_notified = 1 WHERE release_date IS NOT NULL"))
     if "created_at" not in book_columns:
         conn.execute(text("ALTER TABLE books ADD COLUMN created_at DATETIME"))
         conn.execute(text("UPDATE books SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"))

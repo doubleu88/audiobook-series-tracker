@@ -255,3 +255,33 @@ def test_prowlarr_download_form_custom_query():
         download_book_form(mock_request, book_id=1, query=None, user=user)
         mock_client.search.assert_called_with("Canonical Title")
 
+
+
+def test_release_date_announcement_not_repeated_when_date_flaps(db_session):
+    """A date that disappears and reappears between scrapes must be announced only once."""
+    series = Series(
+        name="Test Series", url="http://example.com", asin="SERIES1",
+        last_checked=datetime.datetime.utcnow(),
+    )
+    db_session.add(series)
+    db_session.commit()
+    book = Book(series_id=series.id, asin="B01", title="Book 1", position=1.0, url="http://example.com/1")
+    db_session.add(book)
+    db_session.commit()
+
+    def scrape(release_date):
+        return ScrapedSeries(
+            name="Test Series", asin="SERIES1", url="http://example.com",
+            books=[ScrapedBook(
+                asin="B01", title="Book 1", position=1.0, release_date=release_date,
+                url="http://example.com/1", image_url=None,
+                editions=[ScrapedEdition(asin="B01", title="Book 1", is_primary=True)],
+            )],
+        )
+
+    future = datetime.date.today() + datetime.timedelta(days=30)
+    with patch("app.scheduler._push_to_series_subscribers") as push:
+        update_series_from_scraped(db_session, series, scrape(future))
+        update_series_from_scraped(db_session, series, scrape(None))
+        update_series_from_scraped(db_session, series, scrape(future))
+    assert push.call_count == 1

@@ -55,6 +55,8 @@ def _notify_new_and_dated(session, series: Series, new_books: list[Book], dated_
             messages.append(f"Release dates announced for {len(dated_books)} books")
 
     body = " · ".join(messages)
+    for book in dated_books:
+        book.date_announced_notified = True
     icon = _pick_icon(new_books + dated_books)
     _push_to_series_subscribers(session, series, body, icon)
 
@@ -167,6 +169,7 @@ def update_series_from_scraped(session, series: Series, scraped: ScrapedSeries) 
             book = Book(series_id=series.id, asin=scraped_book.asin)
             session.add(book)
             mark_calendar_revision(book, changed=True, now=now)
+            book.date_announced_notified = scraped_book.release_date is not None
             if is_first_scrape:
                 if scraped_book.release_date is not None and scraped_book.release_date <= today:
                     book.release_day_notified = True
@@ -189,7 +192,7 @@ def update_series_from_scraped(session, series: Series, scraped: ScrapedSeries) 
             if not is_first_scrape and book.release_date is None and scraped_book.release_date is not None:
                 if scraped_book.release_date == today:
                     released_today.append(book)
-                else:
+                elif not book.date_announced_notified:
                     dated_books.append(book)
             elif (
                 not is_first_scrape
