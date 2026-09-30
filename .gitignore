@@ -5,3 +5,5 @@ data/*.db
 data/.session_secret
 data/.vapid_private_key.pem
 .DS_Store
+.pytest_cache/
+.coverage

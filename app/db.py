@@ -1,4 +1,5 @@
 import logging
+import os
 import secrets
 from pathlib import Path
 
@@ -9,7 +10,8 @@ from app.models import Base
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+# AUDIOBOOK_DATA_DIR lets the test suite point the app at a throwaway directory.
+DATA_DIR = Path(os.environ.get("AUDIOBOOK_DATA_DIR") or Path(__file__).resolve().parent.parent / "data")
 DATA_DIR.mkdir(exist_ok=True)
 DB_PATH = DATA_DIR / "audiobooks.db"
 
