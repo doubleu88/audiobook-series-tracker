@@ -18,6 +18,7 @@ failure, so a broken notification shows up as a failed workflow step.
 import json
 import os
 import sys
+import urllib.error
 import urllib.request
 
 TELEGRAM_URL_TMPL = "https://api.telegram.org/bot{token}/sendMessage"
@@ -38,6 +39,12 @@ def main() -> None:
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             resp.read()
+    except urllib.error.HTTPError as exc:
+        # Telegram explains rejections in the body (e.g. "chat not found"); the bare
+        # "HTTP Error 400" alone doesn't say whether the token, chat id or text is wrong.
+        detail = exc.read().decode(errors="replace")
+        print(f"Telegram notification failed: {exc} -- {detail}", file=sys.stderr)
+        sys.exit(1)
     except Exception as exc:  # noqa: BLE001 -- must fail loudly, not silently drop the notification
         print(f"Telegram notification failed: {exc}", file=sys.stderr)
         sys.exit(1)

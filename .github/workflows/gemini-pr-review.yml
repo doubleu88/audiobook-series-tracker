@@ -52,13 +52,16 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Via env, not interpolated into the script: the summary is model
+          # output derived from the PR diff and can contain backticks or $(...).
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          VERDICT: ${{ steps.review.outputs.verdict }}
+          SUMMARY: ${{ steps.review.outputs.summary }}
         run: |
-          python3 scripts/telegram_notify.py "$(cat <<EOF
-          Gemini review of PR #${{ github.event.pull_request.number }}: ${{ steps.review.outputs.verdict }}
-          ${{ steps.review.outputs.summary }}
-          ${{ github.event.pull_request.html_url }}
-          EOF
-          )"
+          python3 scripts/telegram_notify.py "Gemini review of PR #$PR_NUMBER: $VERDICT
+          $SUMMARY
+          $PR_URL"
 
       - name: Send Telegram failure notification
         if: failure() && steps.review.outcome == 'failure'
