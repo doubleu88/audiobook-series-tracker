@@ -88,6 +88,7 @@ class Book(Base):
     url: Mapped[str] = mapped_column(String)
     cover_image: Mapped[str | None] = mapped_column(String, nullable=True)
     release_day_notified: Mapped[bool] = mapped_column(Boolean, default=False)
+    date_announced_notified: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=datetime.datetime.utcnow)
     # Revision clock for the calendar feed. Google Calendar drops subscribed
     # updates whose DTSTAMP moved backwards or whose SEQUENCE did not increase.
