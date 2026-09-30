@@ -5,6 +5,10 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [2.1.2] - 2026-09-30
+
+- Fixed repeated daily "Release date announced" notifications for the same book. Each book's release date is now announced at most once.
+
 ## [2.1.1] - 2026-09-30
 
 - Fixed the Telegram PR notifications breaking when a PR title or Gemini review summary contained backticks or shell syntax, and closed a command-injection hole in those workflows.
