@@ -598,7 +598,23 @@ def run_scan_for_user(user_id: int) -> None:
             in_library = bool(matching)
             matched_asin = next(iter(matching)) if in_library else None
 
-            if status is not None and status.in_library:
+            # Detect ASIN mismatch: status marked in library with an ASIN that does not belong to this book slot
+            has_asin_mismatch = (
+                status is not None
+                and status.in_library
+                and status.matched_asin is not None
+                and status.matched_asin.upper() not in slot_asins
+            )
+            if has_asin_mismatch:
+                logger.warning(
+                    "Detected ASIN mismatch for book %s ('%s'): matched_asin '%s' not in slot ASINs %s. Re-evaluating library status.",
+                    book.id,
+                    book.title,
+                    status.matched_asin,
+                    slot_asins,
+                )
+
+            if status is not None and status.in_library and not has_asin_mismatch:
                 already_in_library += 1
                 status.checked_at = now
                 if matched_asin and not status.matched_asin:
@@ -679,48 +695,59 @@ def reconcile_series_with_cached_asins(session, user_id: int, series: Series) ->
     if not book_ids:
         return 0
 
-    existing_in_lib = {
-        s.book_id
-        for s in session.query(UserBookStatus.book_id)
+    existing_statuses = {
+        s.book_id: s
+        for s in session.query(UserBookStatus)
         .filter(
             UserBookStatus.user_id == user_id,
             UserBookStatus.book_id.in_(book_ids),
-            UserBookStatus.in_library.is_(True),
         )
         .all()
     }
 
-    matching_updates: list[tuple[Book, str]] = []
+    matching_updates: list[tuple[Book, bool, str | None]] = []
     for b in series.books:
-        if b.id in existing_in_lib:
-            continue
         slot_asins = {b.asin.upper()} if b.asin else set()
         for ed in b.editions:
             if ed.asin:
                 slot_asins.add(ed.asin.upper())
+
+        st = existing_statuses.get(b.id)
+        has_mismatch = (
+            st is not None
+            and st.in_library
+            and st.matched_asin is not None
+            and st.matched_asin.upper() not in slot_asins
+        )
+
+        if st and st.in_library and not has_mismatch:
+            continue
+
         matched = slot_asins.intersection(cached)
         if matched:
-            matching_updates.append((b, next(iter(matched))))
+            matching_updates.append((b, True, next(iter(matched))))
+        elif has_mismatch:
+            matching_updates.append((b, False, None))
 
     if not matching_updates:
         return 0
 
     updated = 0
     try:
-        for book, matched_asin in matching_updates:
+        for book, in_lib, matched_asin in matching_updates:
             stmt = (
                 sqlite_insert(UserBookStatus)
                 .values(
                     user_id=user_id,
                     book_id=book.id,
-                    in_library=True,
+                    in_library=in_lib,
                     matched_asin=matched_asin,
                     checked_at=now,
                 )
                 .on_conflict_do_update(
                     index_elements=["user_id", "book_id"],
                     set_={
-                        "in_library": True,
+                        "in_library": in_lib,
                         "matched_asin": matched_asin,
                         "checked_at": now,
                     },
