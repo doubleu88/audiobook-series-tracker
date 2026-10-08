@@ -285,3 +285,121 @@ def test_release_date_announcement_not_repeated_when_date_flaps(db_session):
         update_series_from_scraped(db_session, series, scrape(None))
         update_series_from_scraped(db_session, series, scrape(future))
     assert push.call_count == 1
+
+
+def test_omnibus_series_with_numbered_volumes_not_absorbed():
+    """An omnibus series whose volumes are numbered (e.g. sequence '1', '2', '3') must keep each volume
+
+    in its own slot and not absorb volume 1 across slots 2 and 3 simply because the title contains 'Books 1-3'.
+    """
+    mock_series_resp = MagicMock()
+    mock_series_resp.status_code = 200
+    mock_series_resp.json.return_value = {
+        "product": {
+            "title": "System Apocalypse Omnibus",
+            "relationships": [
+                {"relationship_type": "series", "asin": "B01", "sequence": "1"},
+                {"relationship_type": "series", "asin": "B02", "sequence": "2"},
+                {"relationship_type": "series", "asin": "B03", "sequence": "3"},
+                {"relationship_type": "series", "asin": "B04", "sequence": "4"},
+            ],
+        }
+    }
+
+    mock_chunk_resp = MagicMock()
+    mock_chunk_resp.status_code = 200
+    mock_chunk_resp.json.return_value = {
+        "products": [
+            {
+                "asin": "B01",
+                "title": "The System Apocalypse Books 1-3",
+                "format_type": "unabridged",
+                "distribution_rights": {"distribution_rights_region": "US"},
+            },
+            {
+                "asin": "B02",
+                "title": "The System Apocalypse: Books 4-6",
+                "format_type": "unabridged",
+                "distribution_rights": {"distribution_rights_region": "US"},
+            },
+            {
+                "asin": "B03",
+                "title": "The System Apocalypse, Books 7-9",
+                "format_type": "unabridged",
+                "distribution_rights": {"distribution_rights_region": "US"},
+            },
+            {
+                "asin": "B04",
+                "title": "The System Apocalypse, Books 10-12",
+                "format_type": "unabridged",
+                "distribution_rights": {"distribution_rights_region": "US"},
+            },
+        ]
+    }
+
+    with patch("httpx.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+        mock_client.get.side_effect = [mock_series_resp, mock_chunk_resp]
+
+        scraped = fetch_series_via_api("B0CGZXJF3B", "http://example.com")
+
+    assert len(scraped.books) == 4
+    positions = [b.position for b in scraped.books]
+    asins = [b.asin for b in scraped.books]
+    titles = [b.title for b in scraped.books]
+
+    assert positions == [1.0, 2.0, 3.0, 4.0]
+    assert asins == ["B01", "B02", "B03", "B04"]
+    assert titles == [
+        "The System Apocalypse Books 1-3",
+        "The System Apocalypse: Books 4-6",
+        "The System Apocalypse, Books 7-9",
+        "The System Apocalypse, Books 10-12",
+    ]
+    for b in scraped.books:
+        edition_asins = [e.asin for e in b.editions]
+        assert edition_asins == [b.asin]
+
+
+def test_mixed_series_with_box_set_attaches_to_all_covered_slots():
+    """In a standard series containing both individual books and a box set,
+
+    the box set attaches as an alternate edition to all covered position slots.
+    """
+    mock_series_resp = MagicMock(status_code=200)
+    mock_series_resp.json.return_value = {
+        "product": {
+            "title": "Fantasy Series",
+            "relationships": [
+                {"relationship_type": "series", "asin": "BK01", "sequence": "1"},
+                {"relationship_type": "series", "asin": "BK02", "sequence": "2"},
+                {"relationship_type": "series", "asin": "BK03", "sequence": "3"},
+                {"relationship_type": "series", "asin": "BOX123", "sequence": "1-3"},
+            ],
+        }
+    }
+    mock_chunk_resp = MagicMock(status_code=200)
+    mock_chunk_resp.json.return_value = {
+        "products": [
+            {"asin": "BK01", "title": "The First Book", "format_type": "unabridged", "distribution_rights": {"distribution_rights_region": "US"}},
+            {"asin": "BK02", "title": "The Second Book", "format_type": "unabridged", "distribution_rights": {"distribution_rights_region": "US"}},
+            {"asin": "BK03", "title": "The Third Book", "format_type": "unabridged", "distribution_rights": {"distribution_rights_region": "US"}},
+            {"asin": "BOX123", "title": "Books 1-3: The Omnibus", "format_type": "unabridged", "distribution_rights": {"distribution_rights_region": "US"}},
+        ]
+    }
+
+    with patch("httpx.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+        mock_client.get.side_effect = [mock_series_resp, mock_chunk_resp]
+
+        scraped = fetch_series_via_api("SERIES01", "http://example.com")
+
+    assert len(scraped.books) == 3
+    assert [b.position for b in scraped.books] == [1.0, 2.0, 3.0]
+    assert [b.asin for b in scraped.books] == ["BK01", "BK02", "BK03"]
+    for b in scraped.books:
+        assert "BOX123" in [e.asin for e in b.editions]
+
+
