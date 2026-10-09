@@ -1,8 +1,10 @@
 import logging
 import secrets
+import sqlite3
 from pathlib import Path
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.models import Base
@@ -12,6 +14,13 @@ logger = logging.getLogger(__name__)
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 DB_PATH = DATA_DIR / "audiobooks.db"
+
+@event.listens_for(Engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
@@ -103,6 +112,59 @@ def _migrate(conn) -> None:
                 "INSERT OR IGNORE INTO book_editions (book_id, asin, title, is_primary, created_at) "
                 "SELECT id, asin, title, 1, CURRENT_TIMESTAMP FROM books WHERE asin IS NOT NULL"
             ))
+
+    if "user_book_status" in inspect(conn).get_table_names() and "books" in inspect(conn).get_table_names():
+        # Clean up any orphaned user_book_status records left behind by deleted books
+        conn.execute(text("DELETE FROM user_book_status WHERE book_id NOT IN (SELECT id FROM books)"))
+
+        # Clean up any user_book_status records where matched_asin does not belong to the book's slot/editions
+        ubs_cols = {col["name"] for col in inspect(conn).get_columns("user_book_status")}
+        if "matched_asin" in ubs_cols:
+            if "book_editions" in inspect(conn).get_table_names():
+                conn.execute(text("""
+                    UPDATE user_book_status
+                    SET in_library = 0, matched_asin = NULL, acknowledged = 0, acknowledged_at = NULL, requested_at = NULL, last_error = NULL
+                    WHERE matched_asin IS NOT NULL
+                      AND matched_asin COLLATE NOCASE NOT IN (
+                          SELECT asin FROM books WHERE books.id = user_book_status.book_id AND asin IS NOT NULL
+                          UNION
+                          SELECT asin FROM book_editions WHERE book_editions.book_id = user_book_status.book_id AND asin IS NOT NULL
+                      )
+                """))
+            else:
+                conn.execute(text("""
+                    UPDATE user_book_status
+                    SET in_library = 0, matched_asin = NULL, acknowledged = 0, acknowledged_at = NULL, requested_at = NULL, last_error = NULL
+                    WHERE matched_asin IS NOT NULL
+                      AND matched_asin COLLATE NOCASE NOT IN (
+                          SELECT asin FROM books WHERE books.id = user_book_status.book_id AND asin IS NOT NULL
+                      )
+                """))
+
+        # Clean up any ghost acknowledged or requested timestamps predating the book's creation
+        book_cols = {col["name"] for col in inspect(conn).get_columns("books")}
+        if "created_at" in book_cols and "acknowledged_at" in ubs_cols:
+            conn.execute(text("""
+                UPDATE user_book_status
+                SET acknowledged = 0, acknowledged_at = NULL
+                WHERE acknowledged_at IS NOT NULL
+                  AND EXISTS (
+                      SELECT 1 FROM books b
+                      WHERE b.id = user_book_status.book_id
+                        AND user_book_status.acknowledged_at < b.created_at
+                  )
+            """))
+        if "created_at" in book_cols and "requested_at" in ubs_cols:
+            conn.execute(text("""
+                UPDATE user_book_status
+                SET requested_at = NULL, last_error = NULL
+                WHERE requested_at IS NOT NULL
+                  AND EXISTS (
+                      SELECT 1 FROM books b
+                      WHERE b.id = user_book_status.book_id
+                        AND user_book_status.requested_at < b.created_at
+                  )
+            """))
 
     if "users" in inspect(conn).get_table_names():
         has_admin = conn.execute(text("SELECT 1 FROM users WHERE is_admin = 1 LIMIT 1")).first()

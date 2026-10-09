@@ -255,8 +255,6 @@ def test_prowlarr_download_form_custom_query():
         download_book_form(mock_request, book_id=1, query=None, user=user)
         mock_client.search.assert_called_with("Canonical Title")
 
-
-
 def test_release_date_announcement_not_repeated_when_date_flaps(db_session):
     """A date that disappears and reappears between scrapes must be announced only once."""
     series = Series(
@@ -285,3 +283,233 @@ def test_release_date_announcement_not_repeated_when_date_flaps(db_session):
         update_series_from_scraped(db_session, series, scrape(None))
         update_series_from_scraped(db_session, series, scrape(future))
     assert push.call_count == 1
+
+def test_cascade_delete_books_removes_user_book_status(db_session):
+    """Deleting a series or book cascades and removes associated UserBookStatus records."""
+    user = User(username="testuser", password_hash="hash")
+    db_session.add(user)
+    db_session.commit()
+
+    series = Series(name="Cascade Series", url="http://example.com", asin="CASC01")
+    db_session.add(series)
+    db_session.commit()
+
+    book = Book(series_id=series.id, asin="B01", title="Book 1", position=1.0, url="http://example.com/1")
+    db_session.add(book)
+    db_session.commit()
+
+    status = UserBookStatus(user_id=user.id, book_id=book.id, in_library=True, matched_asin="B01")
+    db_session.add(status)
+    db_session.commit()
+
+    status_id = status.id
+    # Delete series, which should cascade to books, which should cascade to statuses
+    db_session.delete(series)
+    db_session.commit()
+
+    assert db_session.get(Book, book.id) is None
+    assert db_session.get(UserBookStatus, status_id) is None
+
+
+def test_scan_detects_and_resolves_asin_mismatch(db_session):
+    """Library scan detects if a status record has a mismatched alien ASIN and re-evaluates it."""
+    from app.models import Subscription
+    from app.scheduler import run_scan_for_user
+
+    user = User(
+        username="scanuser",
+        password_hash="hash",
+        abs_base_url="http://abs:80",
+        abs_api_key="key",
+        abs_library_id="lib1",
+    )
+    db_session.add(user)
+    db_session.commit()
+
+    series = Series(name="Mismatch Series", url="http://example.com", asin="MISMATCH01")
+    db_session.add(series)
+    db_session.commit()
+
+    sub = Subscription(user_id=user.id, series_id=series.id)
+    db_session.add(sub)
+    db_session.commit()
+
+    book1 = Book(
+        series_id=series.id,
+        asin="REAL01",
+        title="Book 1",
+        position=1.0,
+        release_date=datetime.date(2025, 1, 1),
+        url="http://example.com/1",
+    )
+    book2 = Book(
+        series_id=series.id,
+        asin="REAL02",
+        title="Book 2",
+        position=2.0,
+        release_date=datetime.date(2025, 1, 1),
+        url="http://example.com/2",
+    )
+    db_session.add_all([book1, book2])
+    db_session.commit()
+
+    b1_id = book1.id
+    b2_id = book2.id
+
+    # Corrupt both statuses with alien ASINs from recycled IDs
+    st1 = UserBookStatus(user_id=user.id, book_id=b1_id, in_library=True, matched_asin="ALIEN_A")
+    st2 = UserBookStatus(user_id=user.id, book_id=b2_id, in_library=True, matched_asin="ALIEN_B")
+    db_session.add_all([st1, st2])
+    db_session.commit()
+
+    # Suppose ABS library only actually has REAL01 (REAL02 is missing)
+    mock_abs = MagicMock()
+    mock_abs.list_asins_in_library.return_value = {"REAL01"}
+
+    with patch("app.scheduler.get_session", return_value=db_session), \
+         patch("app.scheduler.ABSClient", return_value=mock_abs):
+        run_scan_for_user(user.id)
+
+    # st1 should have detected the mismatch with ALIEN_A, but found REAL01 in ABS -> in_library=True, matched_asin=REAL01
+    res1 = db_session.query(UserBookStatus).filter_by(book_id=b1_id, user_id=user.id).first()
+    assert res1.in_library is True
+    assert res1.matched_asin == "REAL01"
+
+    # st2 should have detected the mismatch with ALIEN_B, and since REAL02 is NOT in ABS -> in_library=False, matched_asin=None
+    res2 = db_session.query(UserBookStatus).filter_by(book_id=b2_id, user_id=user.id).first()
+    assert res2.in_library is False
+    assert res2.matched_asin is None
+
+
+def test_reconcile_cached_asins_detects_and_resolves_mismatch(db_session):
+    """reconcile_series_with_cached_asins fixes alien ASIN matches against cached library ASINs."""
+    from app.scheduler import reconcile_series_with_cached_asins
+
+    user = User(username="recuser", password_hash="hash")
+    db_session.add(user)
+    db_session.commit()
+
+    series = Series(name="Rec Series", url="http://example.com", asin="REC01")
+    db_session.add(series)
+    db_session.commit()
+
+    book1 = Book(series_id=series.id, asin="REAL01", title="Book 1", position=1.0, url="http://example.com/1")
+    book2 = Book(series_id=series.id, asin="REAL02", title="Book 2", position=2.0, url="http://example.com/2")
+    db_session.add_all([book1, book2])
+    db_session.commit()
+
+    # Corrupt both statuses with alien ASINs
+    st1 = UserBookStatus(user_id=user.id, book_id=book1.id, in_library=True, matched_asin="ALIEN_A")
+    st2 = UserBookStatus(user_id=user.id, book_id=book2.id, in_library=True, matched_asin="ALIEN_B")
+    db_session.add_all([st1, st2])
+    db_session.commit()
+
+    with patch("app.scheduler.get_cached_abs_asins", return_value={"REAL01"}):
+        updated = reconcile_series_with_cached_asins(db_session, user.id, series)
+
+    assert updated == 2
+    db_session.refresh(st1)
+    db_session.refresh(st2)
+    assert st1.in_library is True
+    assert st1.matched_asin == "REAL01"
+    assert st2.in_library is False
+    assert st2.matched_asin is None
+
+
+def test_db_migration_cleans_orphaned_and_mismatched_statuses():
+    """_migrate removes orphaned user_book_status rows and resets mismatched ASIN statuses."""
+    from app.db import _migrate
+    from sqlalchemy import text
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    user = User(username="miguser", password_hash="hash")
+    session.add(user)
+    session.commit()
+
+    series = Series(name="Mig Series", url="http://example.com", asin="MIG01")
+    session.add(series)
+    session.commit()
+
+    book = Book(series_id=series.id, asin="VALID01", title="Valid Book", position=1.0, url="http://example.com/1")
+    book_mismatched = Book(series_id=series.id, asin="REAL_BOOK_2", title="Book 2", position=2.0, url="http://example.com/2")
+    book_predated = Book(
+        series_id=series.id,
+        asin="REAL_BOOK_3",
+        title="Book 3",
+        position=3.0,
+        url="http://example.com/3",
+        created_at=datetime.datetime(2026, 9, 30, 12, 0, 0),
+    )
+    book_case = Book(series_id=series.id, asin="lower_asin", title="Book 4", position=4.0, url="http://example.com/4")
+    session.add_all([book, book_mismatched, book_predated, book_case])
+    session.commit()
+    b_valid_id = book.id
+    b_mismatched_id = book_mismatched.id
+    b_predated_id = book_predated.id
+    b_case_id = book_case.id
+
+    # 1. Legitimate status
+    valid_st = UserBookStatus(user_id=user.id, book_id=b_valid_id, in_library=True, matched_asin="VALID01")
+    # 2. Mismatched status pointing to real book but with alien ASIN
+    mismatched_st = UserBookStatus(user_id=user.id, book_id=b_mismatched_id, in_library=True, matched_asin="BOGUS_ALIEN")
+    # 3. Predated status with acknowledged/requested timestamps predating book.created_at (e.g. Soccer Supremo bug)
+    predated_st = UserBookStatus(
+        user_id=user.id,
+        book_id=b_predated_id,
+        in_library=True,
+        matched_asin="REAL_BOOK_3",
+        acknowledged=True,
+        acknowledged_at=datetime.datetime(2026, 9, 18, 12, 0, 0),
+        requested_at=datetime.datetime(2026, 9, 18, 12, 0, 0),
+        last_error="Old error",
+    )
+    # 4. Status with matched_asin matching book.asin case-insensitively
+    case_st = UserBookStatus(user_id=user.id, book_id=b_case_id, in_library=True, matched_asin="LOWER_ASIN")
+    session.add_all([valid_st, mismatched_st, predated_st, case_st])
+    session.commit()
+
+    # 5. Create an orphaned status manually via raw SQL (disabling foreign keys temporarily to simulate legacy DB)
+    session.execute(text("PRAGMA foreign_keys = OFF"))
+    session.execute(text("INSERT INTO user_book_status (user_id, book_id, in_library, matched_asin, acknowledged) VALUES (1, 99999, 1, 'GHOST_ASIN', 0)"))
+    session.commit()
+
+    # Verify setup before migration
+    assert session.execute(text("SELECT COUNT(*) FROM user_book_status WHERE book_id = 99999")).scalar() == 1
+    session.close()
+
+    with engine.begin() as conn:
+        _migrate(conn)
+
+    session = Session()
+    # Orphan should be deleted
+    assert session.execute(text("SELECT COUNT(*) FROM user_book_status WHERE book_id = 99999")).scalar() == 0
+
+    # Mismatched status should have been reset
+    db_mismatched = session.query(UserBookStatus).filter_by(book_id=b_mismatched_id).first()
+    assert db_mismatched.in_library is False
+    assert db_mismatched.matched_asin is None
+
+    # Valid status should be completely untouched
+    db_valid = session.query(UserBookStatus).filter_by(book_id=b_valid_id).first()
+    assert db_valid.in_library is True
+    assert db_valid.matched_asin == "VALID01"
+
+    # Predated status should have acknowledged and requested timestamps reset
+    db_predated = session.query(UserBookStatus).filter_by(book_id=b_predated_id).first()
+    assert db_predated.acknowledged is False
+    assert db_predated.acknowledged_at is None
+    assert db_predated.requested_at is None
+    assert db_predated.last_error is None
+    assert db_predated.in_library is True
+    assert db_predated.matched_asin == "REAL_BOOK_3"
+
+    # Case-insensitive matched status should be preserved
+    db_case = session.query(UserBookStatus).filter_by(book_id=b_case_id).first()
+    assert db_case.in_library is True
+    assert db_case.matched_asin == "LOWER_ASIN"
+    session.close()
