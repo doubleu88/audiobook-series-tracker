@@ -5,6 +5,10 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [2.1.3] - 2026-10-09
+
+- Fix to repair missing cascade delete in Series; deleted series were creating standalone books which could be adopted into newly added series, which would then inherit their in-library status. Added migration code, cascade statements, and safety code to ABS sync.
+
 ## [2.1.2] - 2026-09-30
 
 - Fixed repeated daily "Release date announced" notifications for the same book. Each book's release date is now announced at most once.
