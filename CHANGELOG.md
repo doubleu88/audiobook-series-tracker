@@ -5,6 +5,10 @@ All notable changes to this project are documented here. Versioning follows
 MAJOR is a breaking change, MINOR is a new backward-compatible feature, and
 PATCH is a fix with no new capability.
 
+## [2.1.4] - 2026-10-12
+
+- Prevent numbered omnibus-only series volumes (e.g. omnibus collections where each volume is numbered 1, 2, 3... but contains books 1-3, 4-6, 7-9... from another series) from erroneously absorbing across each other's series slots and demoting later volumes to alternate editions.
+
 ## [2.1.3] - 2026-10-09
 
 - Fix to repair missing cascade delete in Series; deleted series were creating standalone books which could be adopted into newly added series, which would then inherit their in-library status. Added migration code, cascade statements, and safety code to ABS sync.
