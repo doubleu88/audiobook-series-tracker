@@ -28,6 +28,16 @@ class User(Base):
     prowlarr_base_url: Mapped[str | None] = mapped_column(String, nullable=True)
     prowlarr_api_key: Mapped[str | None] = mapped_column(String, nullable=True)
 
+    subscriptions: Mapped[list["Subscription"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    book_statuses: Mapped[list["UserBookStatus"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    push_subscriptions: Mapped[list["PushSubscription"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
 
 class Series(Base):
     __tablename__ = "series"
@@ -59,7 +69,7 @@ class Subscription(Base):
     series_id: Mapped[int] = mapped_column(ForeignKey("series.id"), index=True)
     muted: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    user: Mapped["User"] = relationship()
+    user: Mapped["User"] = relationship(back_populates="subscriptions")
     series: Mapped["Series"] = relationship(back_populates="subscriptions")
 
 
@@ -73,7 +83,7 @@ class PushSubscription(Base):
     auth: Mapped[str] = mapped_column(String)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=datetime.datetime.utcnow)
 
-    user: Mapped["User"] = relationship()
+    user: Mapped["User"] = relationship(back_populates="push_subscriptions")
 
 
 class Book(Base):
@@ -100,6 +110,10 @@ class Book(Base):
         back_populates="book",
         cascade="all, delete-orphan",
         order_by="desc(BookEdition.is_primary), BookEdition.id",
+    )
+    statuses: Mapped[list["UserBookStatus"]] = relationship(
+        back_populates="book",
+        cascade="all, delete-orphan",
     )
 
     @property
@@ -148,5 +162,5 @@ class UserBookStatus(Base):
     acknowledged: Mapped[bool] = mapped_column(Boolean, default=False)
     acknowledged_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
 
-    user: Mapped["User"] = relationship()
-    book: Mapped["Book"] = relationship()
+    user: Mapped["User"] = relationship(back_populates="book_statuses")
+    book: Mapped["Book"] = relationship(back_populates="statuses")
