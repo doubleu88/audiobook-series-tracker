@@ -303,9 +303,14 @@ def fetch_series_via_api(series_asin: str, fallback_url: str) -> ScrapedSeries:
 
             slots.setdefault(slot_key, []).append((r_item, p))
 
-        # Check for omnibus / box sets that span multiple positions and attach to covered slots
+        # Check for omnibus / box sets that span multiple positions and attach to covered slots.
+        # Only unnumbered or range-sequenced box sets (sequence like "1-3" or None) should be
+        # absorbed across slots; products with a single concrete position in the series (e.g. sequence "1", "2")
+        # represent distinct entries/volumes in this series and must not span across other positions.
         omnibus_asins_absorbed = set()
         for r_item in series_rels:
+            if _parse_sequence(r_item.get("sequence")) is not None:
+                continue
             asin = r_item["asin"]
             p = products_by_asin.get(asin, {})
             rng = _parse_omnibus_range(r_item.get("sequence"), p.get("title"), p.get("subtitle"))
