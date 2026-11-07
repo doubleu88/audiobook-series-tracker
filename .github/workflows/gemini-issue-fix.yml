@@ -1,0 +1,165 @@
+name: Gemini issue triage and fix
+
+# When an issue is opened: tell Telegram about it, have Gemini decide whether
+# it is a real problem, and if it is fixable, draft the fix on a new branch and
+# open a PR for a human to review. Telegram is pinged again when the PR is
+# ready (or, if no PR comes out of it, with Gemini's verdict).
+#
+# Nothing here merges anything: the PR goes through the normal checks and still
+# needs a human to approve and merge it. Gemini's verdict is also posted as a
+# comment on the issue.
+#
+# Safety, since anyone can open an issue and the issue text steers Gemini:
+# - Issue text only ever reaches Gemini as prompt text and the shell via env
+#   vars, never interpolated into a `run:` script (same rule as
+#   pr-telegram-notify.yml).
+# - Gemini's edits are confined to an allowlist (app/, tests/, docs/,
+#   README.md) and applied as exact-match search/replace, see
+#   scripts/gemini_issue_fix.py. It can't touch .github/, dependency files or
+#   the Dockerfile.
+# - The `issues` event always runs this workflow file from the default branch.
+#
+# ADMIN_PAT (not GITHUB_TOKEN) pushes the branch and opens the PR: events
+# caused by GITHUB_TOKEN don't trigger other workflows, so the required
+# pr-checklist check, the new-PR Telegram notice and the Gemini PR review would
+# never run on the bot's PR. This is the same reason changelog-on-merge.yml
+# uses ADMIN_PAT.
+
+"on":
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: gemini-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+env:
+  GEMINI_MODEL: gemini-3.8-flash
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    # Don't react to issues opened by bots (including this repo's own automation).
+    if: github.event.issue.user.type != 'Bot'
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.ADMIN_PAT }}
+
+      - name: Send Telegram issue notification
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Via env, never interpolated into the script: issue text is attacker-controlled.
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          python3 scripts/telegram_notify.py "New issue #$ISSUE_NUMBER: $ISSUE_TITLE
+          By $ISSUE_AUTHOR
+          $ISSUE_URL
+
+          ${ISSUE_BODY:0:1500}
+
+          Gemini is evaluating it now."
+
+      - name: Evaluate issue and draft fix with Gemini
+        id: gemini
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: python3 scripts/gemini_issue_fix.py "$ISSUE_NUMBER"
+
+      - name: Set up Python
+        if: steps.gemini.outputs.has_changes == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run tests on the drafted fix
+        id: tests
+        if: steps.gemini.outputs.has_changes == 'true'
+        # A failing test must not stop the PR from being opened: the PR is
+        # opened as a draft instead, and Telegram says so.
+        continue-on-error: true
+        run: |
+          pip install -r requirements.txt pytest
+          python -m pytest -q tests
+
+      - name: Create branch and PR
+        id: pr
+        if: steps.gemini.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.ADMIN_PAT }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          PR_TITLE: ${{ steps.gemini.outputs.pr_title }}
+          BRANCH: ${{ steps.gemini.outputs.branch }}
+          TESTS_OUTCOME: ${{ steps.tests.outcome }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          # Explicit paths, mirroring the allowlist in scripts/gemini_issue_fix.py,
+          # so stray files (caches, etc.) never get committed.
+          git add app tests docs README.md
+          git commit -m "$PR_TITLE (#$ISSUE_NUMBER)
+
+          Drafted by Gemini from issue #$ISSUE_NUMBER."
+          git push origin "$BRANCH"
+
+          draft_flag=""
+          if [ "$TESTS_OUTCOME" != "success" ]; then
+            draft_flag="--draft"
+            printf '\n> **Tests failed on this draft** -- see the workflow run before trusting it.\n' >> "$RUNNER_TEMP/pr_body.md"
+          fi
+          url=$(gh pr create --base main --head "$BRANCH" \
+            --title "$PR_TITLE" --body-file "$RUNNER_TEMP/pr_body.md" $draft_flag)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Send Telegram PR-ready notification
+        if: steps.gemini.outputs.has_changes == 'true'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+          TESTS_OUTCOME: ${{ steps.tests.outcome }}
+        run: |
+          if [ "$TESTS_OUTCOME" = "success" ]; then
+            status="Tests passed."
+          else
+            status="TESTS FAILED -- opened as a draft."
+          fi
+          python3 scripts/telegram_notify.py "PR ready for review: $PR_URL
+
+          $(cat "$RUNNER_TEMP/telegram_pr.txt")
+
+          $status"
+
+      - name: Send Telegram evaluation notification (no PR)
+        if: success() && steps.gemini.outputs.has_changes != 'true'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python3 scripts/telegram_notify.py "$(cat "$RUNNER_TEMP/telegram_eval.txt")"
+
+      - name: Send Telegram failure notification
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 scripts/telegram_notify.py "Gemini issue workflow failed for issue #$ISSUE_NUMBER -- check the logs.
+          $ISSUE_URL
+          $RUN_URL"
