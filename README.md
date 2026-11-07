@@ -73,15 +73,16 @@ dates, and cover art.
 - **SQLite** for storage via SQLAlchemy.
 - **APScheduler** runs an in-process daily job that re-scrapes every
   subscribed series and updates release dates, new books, and series names.
-- Series discovery and lookup both scrape Audible's public HTML pages
-  directly — `audible.com/series/...` for a series' full book list, and
-  `audible.com/search?keywords=...` for the search page.
-- Both of those requests are made by shelling out to `curl` rather than a
+- Series lookup and series search both use Audible's public catalog API
+  (`api.audible.com/1.0/catalog/products`), which needs no key and, unlike the
+  website, isn't blocked for datacenter/VPS IP ranges.
+- If the API search request itself fails, search falls back to scraping
+  `audible.com/search?keywords=...` by shelling out to `curl` rather than a
   Python HTTP client. This isn't stylistic — Audible's WAF blocks plain
   `httpx` requests (confirmed: identical requests via `curl` succeed, while
   `httpx` and even `curl_cffi` with full Chrome TLS-fingerprint impersonation
-  both get a 503), but the real `curl` binary is unaffected. The Docker image
-  installs `curl` for exactly this reason.
+  both get a 503), but the real `curl` binary is unaffected from residential
+  connections. The Docker image installs `curl` for exactly this reason.
 
 ## Installation
 

@@ -2,7 +2,8 @@
 # relationships and child book metadata. Series data is fetched directly via
 # the Catalog API, with multi-market deduplication favoring canonical US editions
 # and proper handling for upcoming/Date TBD placeholder releases.
-# Plain-text series search uses Audible's search page via curl.
+# Plain-text series search uses the Catalog API too, falling back to Audible's
+# search page via curl if the API search fails or finds nothing.
 
 import datetime
 import logging
@@ -474,7 +475,82 @@ def find_best_match(target_name: str, results: list[SeriesSearchResult]) -> Seri
     return tied[0] if len(tied) == 1 else None
 
 
-def search_series(query: str) -> list[SeriesSearchResult]:
+def _enrich_search_results(results: dict[str, SeriesSearchResult]) -> None:
+    """Fills in canonical series name, book count and authors from the catalog API.
+    Best-effort: a failure here leaves the results as they were."""
+    if not results:
+        return
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(
+                "https://api.audible.com/1.0/catalog/products",
+                params={
+                    "asins": ",".join(results.keys()),
+                    "response_groups": "relationships,product_desc,contributors",
+                },
+                headers={"User-Agent": USER_AGENT},
+            )
+            if resp.status_code != 200:
+                return
+            for p in resp.json().get("products", []):
+                p_asin = p.get("asin")
+                if p_asin not in results:
+                    continue
+                if p.get("title"):
+                    results[p_asin].name = p.get("title")
+                rels = [
+                    r for r in p.get("relationships", []) or []
+                    if r.get("relationship_type") == "series"
+                ]
+                if rels:
+                    results[p_asin].book_count = len(rels)
+                authors = [a.get("name") for a in p.get("authors", []) or [] if a.get("name")]
+                if authors:
+                    results[p_asin].author = ", ".join(authors)
+    except Exception as exc:
+        logger.warning("Failed to prefetch series metadata for search results: %s", exc)
+
+
+def _search_series_via_api(query: str) -> dict[str, SeriesSearchResult]:
+    """Keyword search against the catalog API. Unlike the HTML search page, this is
+    not blocked by Audible's WAF for datacenter/VPS IPs. Each matching book carries
+    the series it belongs to, so series are collected from the hits."""
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.get(
+                "https://api.audible.com/1.0/catalog/products",
+                params={
+                    "keywords": query,
+                    "num_results": "50",
+                    "products_sort_by": "Relevance",
+                    # product_desc is what populates the book title field.
+                    "response_groups": "series,contributors,product_desc",
+                },
+                headers={"User-Agent": USER_AGENT},
+            )
+    except httpx.HTTPError as exc:
+        raise SeriesPageError(f"Audible API search request failed: {exc}") from exc
+    if resp.status_code != 200:
+        raise SeriesPageError(f"Audible API search returned HTTP {resp.status_code}")
+
+    results: dict[str, SeriesSearchResult] = {}
+    for product in resp.json().get("products", []) or []:
+        for entry in product.get("series") or []:
+            series_asin = entry.get("asin")
+            if not series_asin or series_asin in results:
+                continue
+            authors = [a.get("name") for a in product.get("authors") or [] if a.get("name")]
+            results[series_asin] = SeriesSearchResult(
+                asin=series_asin,
+                name=entry.get("title") or series_asin,
+                url=_series_url(series_asin),
+                author=", ".join(authors) or None,
+                sample_title=product.get("title") or "",
+            )
+    return results
+
+
+def _search_series_via_html(query: str) -> dict[str, SeriesSearchResult]:
     html = _curl_get("https://www.audible.com/search", params={"keywords": query})
     soup = BeautifulSoup(html, "html.parser")
 
@@ -507,43 +583,19 @@ def search_series(query: str) -> list[SeriesSearchResult]:
             author=author,
             sample_title=item.get("aria-label", "").strip(),
         )
+    return results
 
-    if results:
-        asins_str = ",".join(results.keys())
-        try:
-            with httpx.Client(timeout=10.0) as client:
-                resp = client.get(
-                    "https://api.audible.com/1.0/catalog/products",
-                    params={
-                        "asins": asins_str,
-                        "response_groups": "relationships,product_desc,contributors",
-                    },
-                    headers={"User-Agent": USER_AGENT},
-                )
-                if resp.status_code == 200:
-                    for p in resp.json().get("products", []):
-                        p_asin = p.get("asin")
-                        if p_asin in results:
-                            if p.get("title"):
-                                results[p_asin].name = p.get("title")
-                            rels = [
-                                r
-                                for r in p.get("relationships", [])
-                                if r.get("relationship_type") == "series"
-                            ]
-                            if rels:
-                                results[p_asin].book_count = len(rels)
-                            authors = [
-                                a.get("name")
-                                for a in p.get("authors", [])
-                                if a.get("name")
-                            ]
-                            if authors:
-                                results[p_asin].author = ", ".join(authors)
-        except Exception as exc:
-            logger.warning(
-                "Failed to prefetch series metadata for search results: %s",
-                exc,
-            )
 
+def search_series(query: str) -> list[SeriesSearchResult]:
+    # The catalog API is primary: it needs no HTML parsing and isn't WAF-blocked from
+    # datacenter IPs. The HTML search page (via curl) is kept as a fallback only when
+    # the API call itself fails; an API search that simply finds nothing is a real
+    # empty result, not a reason to hit the (possibly blocked) website.
+    try:
+        results = _search_series_via_api(query)
+    except SeriesPageError as exc:
+        logger.warning("Audible API search failed, falling back to HTML search: %s", exc)
+        results = _search_series_via_html(query)
+
+    _enrich_search_results(results)
     return list(results.values())
