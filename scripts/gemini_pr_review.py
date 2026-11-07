@@ -86,7 +86,8 @@ def fetch_diff(pr_number: str) -> tuple[str, bool]:
     return diff, False
 
 
-def call_gemini(prompt: str) -> dict:
+def call_gemini(prompt: str, schema: dict = RESPONSE_SCHEMA) -> dict:
+    """Shared with gemini_issue_fix.py, which passes its own response schema."""
     api_key = os.environ["GEMINI_API_KEY"]
     model = os.environ["GEMINI_MODEL"]
     url = GEMINI_URL_TMPL.format(model=model)
@@ -94,7 +95,7 @@ def call_gemini(prompt: str) -> dict:
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
             "response_mime_type": "application/json",
-            "response_schema": RESPONSE_SCHEMA,
+            "response_schema": schema,
         },
     }
     req = urllib.request.Request(
